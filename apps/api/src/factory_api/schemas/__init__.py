@@ -3,10 +3,13 @@
 from factory_api.schemas.auth import (
     RefreshRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     SessionResponse,
     SignInRequest,
     SignOutRequest,
     UserResponse,
+    VerificationChallengeResponse,
+    VerifyEmailRequest,
 )
 from factory_api.schemas.common import MessageResponse, PageMeta, PaginatedResponse
 from factory_api.schemas.errors import ErrorBody, ErrorDetail, ErrorResponse
@@ -35,9 +38,12 @@ __all__ = [
     "ReadinessResponse",
     "RefreshRequest",
     "RegisterRequest",
+    "ResendVerificationRequest",
     "SessionResponse",
     "SignInRequest",
     "SignOutRequest",
     "UpdateProjectRequest",
     "UserResponse",
+    "VerificationChallengeResponse",
+    "VerifyEmailRequest",
 ]

@@ -102,6 +102,20 @@ class TokenReusedError(AuthenticationError):
     message = "The session has been revoked. Please sign in again."
 
 
+class EmailNotVerifiedError(AuthenticationError):
+    """Credentials were correct, but the address has not been proven.
+
+    Reported distinctly from a wrong password on purpose. It only ever reaches someone who
+    already supplied the correct password, so it is not an enumeration vector — and
+    collapsing it into "invalid credentials" would strand a legitimate user with no way to
+    discover that they simply need to enter their code.
+    """
+
+    code = ErrorCode.EMAIL_NOT_VERIFIED
+    status_code = 403
+    message = "Verify your email address to continue."
+
+
 # --- Authorization -------------------------------------------------------
 
 

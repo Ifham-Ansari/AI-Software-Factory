@@ -95,6 +95,24 @@ class UserRepository(Repository):
         row.updated_at = now or datetime.now(UTC)
         await self._session.flush()
 
+    async def mark_email_verified(
+        self, user_id: UserId, *, now: datetime | None = None
+    ) -> User | None:
+        """Record that a user has proven ownership of their address.
+
+        Idempotent: re-verifying keeps the original timestamp, because *when* the address
+        was first proven is the fact worth keeping.
+        """
+        row = await self._session.get(UserRow, user_id)
+        if row is None:
+            return None
+        timestamp = now or datetime.now(UTC)
+        if row.email_verified_at is None:
+            row.email_verified_at = timestamp
+            row.updated_at = timestamp
+            await self._session.flush()
+        return to_user(row)
+
     async def _row_by_email(self, email: str) -> UserRow | None:
         statement = select(UserRow).where(UserRow.email == email).limit(1)
         result = await self._session.execute(statement)

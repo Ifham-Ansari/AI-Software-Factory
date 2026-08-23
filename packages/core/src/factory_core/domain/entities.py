@@ -65,11 +65,19 @@ class User(Entity):
     status: UserStatus
     created_at: datetime
     updated_at: datetime
+    # None until the address is proven. A timestamp rather than a boolean because *when*
+    # an address was verified is a question support and compliance actually ask.
+    email_verified_at: datetime | None = None
 
     @property
     def is_active(self) -> bool:
         """Whether this account may currently authenticate."""
         return self.status.can_authenticate
+
+    @property
+    def is_email_verified(self) -> bool:
+        """Whether this account has proven ownership of its email address."""
+        return self.email_verified_at is not None
 
 
 class Project(Entity):

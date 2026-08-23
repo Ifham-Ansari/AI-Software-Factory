@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from factory_core.application.health import DependencyProbe, HealthService
 from factory_core.config import Settings
+from factory_core.infrastructure.email import EmailSender, build_email_sender
 from factory_core.persistence import SessionFactory, create_engine, create_session_factory
 from factory_core.security import AccessTokenIssuer, PasswordHasher
 
@@ -31,6 +32,7 @@ class AppState:
     session_factory: SessionFactory
     hasher: PasswordHasher
     issuer: AccessTokenIssuer
+    email_sender: EmailSender
     health: HealthService
 
 
@@ -62,6 +64,7 @@ def build_state(settings: Settings) -> AppState:
             audience=settings.security.jwt_audience,
             ttl_seconds=settings.security.access_token_ttl_seconds,
         ),
+        email_sender=build_email_sender(settings.email),
         health=health,
     )
 

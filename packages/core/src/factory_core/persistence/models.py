@@ -48,6 +48,9 @@ class UserRow(Base, TimestampMixin):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    # NULL until the address is proven. Nullable rather than a boolean because *when* an
+    # address was verified is a question support and compliance actually ask.
+    email_verified_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     __table_args__ = (
         # Email is normalised to lowercase by the domain layer before it reaches here,
@@ -112,6 +115,40 @@ class ProjectRow(Base, TimestampMixin):
         # Every project listing is "this owner's projects, newest first".
         Index("ix_projects_owner_id_created_at", "owner_id", "created_at"),
         CheckConstraint("status IN ('draft', 'archived')", name="status_valid"),
+    )
+
+
+class EmailVerificationRow(Base):
+    """One issued email-verification code.
+
+    Stores the SHA-256 digest, never the code. ``attempts`` is on the row rather than in a
+    cache because the limit is a security control: it has to survive a restart, and a
+    cache eviction must not silently hand an attacker a fresh budget of guesses.
+    """
+
+    __tablename__ = "email_verifications"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    __table_args__ = (
+        # Every lookup is "the newest code for this user", and the resend cooldown reads
+        # the same ordering.
+        Index("ix_email_verifications_user_id_issued_at", "user_id", "issued_at"),
+        CheckConstraint(
+            "status IN ('pending', 'consumed', 'expired', 'exhausted')",
+            name="status_valid",
+        ),
+        CheckConstraint("attempts >= 0", name="attempts_non_negative"),
     )
 
 

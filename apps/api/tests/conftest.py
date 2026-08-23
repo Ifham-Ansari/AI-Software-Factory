@@ -24,10 +24,12 @@ from httpx import ASGITransport, AsyncClient
 from factory_api.dependencies import (
     get_audit_repository,
     get_current_user_id,
+    get_email_sender,
     get_project_repository,
     get_refresh_token_repository,
     get_session,
     get_user_repository,
+    get_verification_repository,
 )
 from factory_api.main import create_app
 from factory_core.config import (
@@ -46,6 +48,8 @@ from factory_core.testing import (
     FakeProjectStore,
     FakeRefreshTokenRepository,
     FakeUserRepository,
+    FakeVerificationRepository,
+    RecordingEmailSender,
 )
 
 TEST_PASSWORD = "a-sufficiently-long-passphrase"
@@ -60,6 +64,8 @@ class Fakes:
         self.tokens = FakeRefreshTokenRepository()
         self.audit = FakeAuditRepository()
         self.projects = FakeProjectStore()
+        self.verifications = FakeVerificationRepository()
+        self.emails = RecordingEmailSender()
 
 
 @pytest.fixture
@@ -135,6 +141,10 @@ def app(settings: Settings, fakes: Fakes) -> FastAPI:
     application.dependency_overrides[get_user_repository] = lambda: fakes.users
     application.dependency_overrides[get_refresh_token_repository] = lambda: fakes.tokens
     application.dependency_overrides[get_audit_repository] = lambda: fakes.audit
+    application.dependency_overrides[get_verification_repository] = (
+        lambda: fakes.verifications
+    )
+    application.dependency_overrides[get_email_sender] = lambda: fakes.emails
     application.dependency_overrides[get_project_repository] = scoped_projects
     return application
 
@@ -167,8 +177,25 @@ class ApiHelper:
     packages both called ``tests`` collide.
     """
 
-    def __init__(self, client: AsyncClient) -> None:
+    def __init__(self, client: AsyncClient, emails: RecordingEmailSender) -> None:
         self.client = client
+        self.emails = emails
+
+    async def register_only(
+        self,
+        *,
+        email: str = TEST_EMAIL,
+        password: str = TEST_PASSWORD,
+        display_name: str = "Ada Lovelace",
+    ) -> dict[str, object]:
+        """Create an account without verifying it. Returns the challenge payload."""
+        response = await self.client.post(
+            "/auth/register",
+            json={"email": email, "password": password, "display_name": display_name},
+        )
+        assert response.status_code == 202, response.text
+        payload: dict[str, object] = response.json()
+        return payload
 
     async def register(
         self,
@@ -177,12 +204,17 @@ class ApiHelper:
         password: str = TEST_PASSWORD,
         display_name: str = "Ada Lovelace",
     ) -> dict[str, object]:
-        """Register an account and return the session payload."""
+        """Register, redeem the emailed code, and return the session payload.
+
+        Most tests care about being signed in, not about the verification step itself;
+        that has its own suite.
+        """
+        await self.register_only(email=email, password=password, display_name=display_name)
         response = await self.client.post(
-            "/auth/register",
-            json={"email": email, "password": password, "display_name": display_name},
+            "/auth/verify-email",
+            json={"email": email, "code": self.emails.last_code()},
         )
-        assert response.status_code == 201, response.text
+        assert response.status_code == 200, response.text
         payload: dict[str, object] = response.json()
         return payload
 
@@ -208,6 +240,6 @@ class ApiHelper:
 
 
 @pytest.fixture
-def api(client: AsyncClient) -> ApiHelper:
+def api(client: AsyncClient, fakes: Fakes) -> ApiHelper:
     """Request helpers bound to the test client."""
-    return ApiHelper(client)
+    return ApiHelper(client, fakes.emails)

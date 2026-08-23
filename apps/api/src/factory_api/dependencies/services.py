@@ -15,13 +15,19 @@ from typing import Annotated
 from fastapi import Depends
 
 from factory_api.dependencies.auth import CurrentUserId
-from factory_api.dependencies.context import RequestIdDep, SessionDep, StateDep
+from factory_api.dependencies.context import (
+    EmailSenderDep,
+    RequestIdDep,
+    SessionDep,
+    StateDep,
+)
 from factory_api.dependencies.repositories import (
     AuditRepositoryDep,
     RefreshTokenRepositoryDep,
     UserRepositoryDep,
+    VerificationRepositoryDep,
 )
-from factory_core.application.auth import AuthService
+from factory_core.application.auth import AuthService, EmailVerificationService
 from factory_core.application.projects import ProjectService
 from factory_core.persistence import ProjectRepository
 
@@ -76,5 +82,27 @@ def get_project_service(
     )
 
 
+def get_verification_service(
+    state: StateDep,
+    users: UserRepositoryDep,
+    verifications: VerificationRepositoryDep,
+    audit: AuditRepositoryDep,
+    sender: EmailSenderDep,
+    request_id: RequestIdDep,
+) -> EmailVerificationService:
+    """Build the email-verification service for this request."""
+    return EmailVerificationService(
+        users=users,
+        verifications=verifications,
+        audit=audit,
+        sender=sender,
+        settings=state.settings.verification,
+        request_id=request_id,
+    )
+
+
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+VerificationServiceDep = Annotated[
+    EmailVerificationService, Depends(get_verification_service)
+]
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]

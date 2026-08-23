@@ -1,5 +1,6 @@
 """Layered application configuration."""
 
+from factory_core.config.email import EmailSettings, VerificationSettings
 from factory_core.config.environment import Environment
 from factory_core.config.integrations import (
     LangSmithSettings,
@@ -13,6 +14,7 @@ from factory_core.config.settings import DatabaseSettings, SecuritySettings, Set
 __all__ = [
     "ApiSettings",
     "DatabaseSettings",
+    "EmailSettings",
     "Environment",
     "LangSmithSettings",
     "ObservabilitySettings",
@@ -20,6 +22,7 @@ __all__ = [
     "RedisSettings",
     "SecuritySettings",
     "Settings",
+    "VerificationSettings",
     "get_settings",
     "load_settings",
 ]

@@ -16,7 +16,7 @@ from factory_core.application.auth import AuthSession
 from factory_core.domain.entities import User
 from factory_core.domain.values import Email
 
-MIN_PASSWORD_LENGTH = 12
+MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
 
 
@@ -74,6 +74,42 @@ class SignOutRequest(BaseModel):
     refresh_token: str = Field(min_length=1, max_length=512)
 
 
+class VerifyEmailRequest(BaseModel):
+    """Redeem a one-time verification code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: Email
+    # Digits only, fixed length. Validated here so a malformed code never reaches the
+    # comparison path and burns one of the caller's limited attempts.
+    code: str = Field(min_length=6, max_length=10, pattern=r"^\d+$")
+
+
+class ResendVerificationRequest(BaseModel):
+    """Request a fresh verification code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: Email
+
+
+class VerificationChallengeResponse(BaseModel):
+    """Issued after registration or a resend.
+
+    Carries no code and no identifier for one — only what the UI needs to render a timer
+    and a resend button.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: str
+    expires_in: int = Field(description="Seconds until the code expires.")
+    resend_available_in: int = Field(
+        description="Seconds before another code may be requested."
+    )
+    message: str = "Check your email for a verification code."
+
+
 class UserResponse(BaseModel):
     """A user, as returned to clients.
 
@@ -87,6 +123,7 @@ class UserResponse(BaseModel):
     display_name: str
     status: str
     created_at: datetime
+    email_verified: bool
 
     @classmethod
     def from_entity(cls, user: User) -> UserResponse:
@@ -97,6 +134,9 @@ class UserResponse(BaseModel):
             display_name=user.display_name,
             status=user.status.value,
             created_at=user.created_at,
+            # A boolean, not the timestamp: the client only needs to know whether to show
+            # the verification prompt.
+            email_verified=user.is_email_verified,
         )
 
 

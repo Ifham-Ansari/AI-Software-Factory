@@ -23,10 +23,12 @@ from factory_core.application.auth.schemas import (
 )
 from factory_core.application.ports import Clock, SystemClock
 from factory_core.domain.audit import AuditAction, AuditRequest
+from factory_core.domain.entities import User
 from factory_core.domain.ids import TokenFamilyId, new_token_family_id, new_user_id
 from factory_core.domain.policies import ensure_active_user
 from factory_core.errors import (
     AlreadyExistsError,
+    EmailNotVerifiedError,
     InvalidCredentialsError,
     TokenExpiredError,
     TokenInvalidError,
@@ -76,8 +78,13 @@ class AuthService:
             clock=self._clock,
         )
 
-    async def register(self, command: RegisterCommand) -> AuthSession:
-        """Create an account and sign the new user in.
+    async def register(self, command: RegisterCommand) -> User:
+        """Create an account, unverified.
+
+        Deliberately does **not** return a session. The address has not been proven yet,
+        and handing out tokens first would mean anyone could sign up with someone else's
+        address and immediately use the account. The caller issues a verification
+        challenge; a session comes only after the code is redeemed.
 
         Raises:
             AlreadyExistsError: The email address is already registered.
@@ -96,6 +103,14 @@ class AuthService:
         )
         await self._record(AuditRequest.for_user(AuditAction.USER_REGISTERED, user.id))
         logger.info("auth.registered", user_id=str(user.id))
+        return user
+
+    async def start_session(self, user: User) -> AuthSession:
+        """Mint a session for a user whose identity is already established.
+
+        Used by the verification flow, which has just proven ownership of the address and
+        so does not re-check a password.
+        """
         session, _ = await self._minter.mint(user, family_id=new_token_family_id())
         return session
 
@@ -131,6 +146,16 @@ class AuthService:
                 AuditRequest.for_user(AuditAction.USER_SIGN_IN_FAILED, user.id, reason="suspended")
             )
             raise InvalidCredentialsError
+
+        if not user.is_email_verified:
+            # Only reachable with the correct password, so this is not an enumeration
+            # vector — and the caller needs to know to go and enter their code.
+            await self._record(
+                AuditRequest.for_user(
+                    AuditAction.USER_SIGN_IN_FAILED, user.id, reason="unverified"
+                )
+            )
+            raise EmailNotVerifiedError
 
         if self._hasher.needs_rehash(password_hash):
             # Opportunistic upgrade to current cost parameters, without a password reset.

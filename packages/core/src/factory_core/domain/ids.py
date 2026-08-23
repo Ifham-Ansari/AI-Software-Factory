@@ -19,6 +19,7 @@ ProjectId = NewType("ProjectId", uuid.UUID)
 TokenId = NewType("TokenId", uuid.UUID)
 TokenFamilyId = NewType("TokenFamilyId", uuid.UUID)
 AuditEntryId = NewType("AuditEntryId", uuid.UUID)
+VerificationId = NewType("VerificationId", uuid.UUID)
 
 
 def new_id() -> uuid.UUID:
@@ -44,6 +45,11 @@ def new_token_id() -> TokenId:
 def new_token_family_id() -> TokenFamilyId:
     """Generate a fresh refresh-token family identifier."""
     return TokenFamilyId(new_id())
+
+
+def new_verification_id() -> VerificationId:
+    """Generate a fresh email-verification identifier."""
+    return VerificationId(new_id())
 
 
 def parse_uuid(value: str) -> uuid.UUID | None:

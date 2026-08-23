@@ -18,6 +18,7 @@ from functools import lru_cache
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_settings import BaseSettings
 
+from factory_core.config.email import EmailSettings, VerificationSettings
 from factory_core.config.integrations import (
     LangSmithSettings,
     OpenAISettings,
@@ -97,6 +98,8 @@ def load_settings() -> Settings:
     api = _build(ApiSettings, "API__", problems)
     # Optional sections. Built here rather than left to default_factory so a malformed
     # value reports its own variable name instead of surfacing as an opaque root error.
+    email = _build(EmailSettings, "EMAIL__", problems)
+    verification = _build(VerificationSettings, "VERIFICATION__", problems)
     redis = _build(RedisSettings, "REDIS__", problems)
     openai = _build(OpenAISettings, "OPENAI__", problems)
     langsmith = _build(LangSmithSettings, "LANGSMITH__", problems)
@@ -108,6 +111,8 @@ def load_settings() -> Settings:
     assert security is not None
     assert observability is not None
     assert api is not None
+    assert email is not None
+    assert verification is not None
     assert redis is not None
     assert openai is not None
     assert langsmith is not None
@@ -118,6 +123,8 @@ def load_settings() -> Settings:
             security=security,
             observability=observability,
             api=api,
+            email=email,
+            verification=verification,
             redis=redis,
             openai=openai,
             langsmith=langsmith,

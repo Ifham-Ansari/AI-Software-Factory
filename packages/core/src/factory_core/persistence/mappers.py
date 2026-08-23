@@ -15,14 +15,17 @@ from factory_core.domain.ids import (
     TokenFamilyId,
     TokenId,
     UserId,
+    VerificationId,
 )
 from factory_core.persistence.models import (
     AuditLogRow,
+    EmailVerificationRow,
     ProjectRow,
     RefreshTokenRow,
     UserRow,
 )
 from factory_core.security.refresh import RefreshTokenRecord, RefreshTokenStatus
+from factory_core.security.verification import VerificationCode, VerificationStatus
 
 
 def to_user(row: UserRow) -> User:
@@ -34,6 +37,7 @@ def to_user(row: UserRow) -> User:
         status=UserStatus(row.status),
         created_at=row.created_at,
         updated_at=row.updated_at,
+        email_verified_at=row.email_verified_at,
     )
 
 
@@ -81,6 +85,36 @@ def to_refresh_token_row(record: RefreshTokenRecord) -> RefreshTokenRow:
         rotated_at=record.rotated_at,
         revoked_at=record.revoked_at,
         replaced_by_id=record.replaced_by_id,
+    )
+
+
+def to_verification(row: EmailVerificationRow) -> VerificationCode:
+    """Map a verification row onto its record."""
+    return VerificationCode(
+        id=VerificationId(row.id),
+        user_id=UserId(row.user_id),
+        code_hash=row.code_hash,
+        status=VerificationStatus(row.status),
+        attempts=row.attempts,
+        max_attempts=row.max_attempts,
+        issued_at=row.issued_at,
+        expires_at=row.expires_at,
+        consumed_at=row.consumed_at,
+    )
+
+
+def to_verification_row(record: VerificationCode) -> EmailVerificationRow:
+    """Build a persistable row from a freshly issued verification record."""
+    return EmailVerificationRow(
+        id=record.id,
+        user_id=record.user_id,
+        code_hash=record.code_hash,
+        status=record.status.value,
+        attempts=record.attempts,
+        max_attempts=record.max_attempts,
+        issued_at=record.issued_at,
+        expires_at=record.expires_at,
+        consumed_at=record.consumed_at,
     )
 
 

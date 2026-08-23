@@ -22,6 +22,7 @@ class ErrorCode(StrEnum):
     TOKEN_INVALID = "token_invalid"
     TOKEN_REUSED = "token_reused"
     NOT_AUTHENTICATED = "not_authenticated"
+    EMAIL_NOT_VERIFIED = "email_not_verified"
 
     # --- Authorization ---------------------------------------------------
     FORBIDDEN = "forbidden"

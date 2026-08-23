@@ -9,6 +9,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from factory_api.state import AppState
+from factory_core.infrastructure.email import EmailSender
 from factory_core.persistence import unit_of_work
 
 
@@ -37,6 +38,17 @@ async def get_session(
         yield session
 
 
+def get_email_sender(request: Request) -> EmailSender:
+    """Return the process-wide email transport.
+
+    A dependency rather than a direct read of application state, so tests can swap in
+    a recording transport through the same override mechanism as the repositories.
+    """
+    state: AppState = request.app.state.app_state
+    return state.email_sender
+
+
 StateDep = Annotated[AppState, Depends(get_state)]
+EmailSenderDep = Annotated[EmailSender, Depends(get_email_sender)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 RequestIdDep = Annotated[str | None, Depends(get_request_id)]

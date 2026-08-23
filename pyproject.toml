@@ -81,6 +81,10 @@ ignore = [
 "**/domain/audit.py" = ["S105"]
 "**/application/auth/schemas.py" = ["S105"]
 "**/factory_api/schemas/auth.py" = ["S105"]
+# Email HTML carries long inline style attributes. Email clients support only a
+# small, inconsistent subset of CSS, and wrapping the attributes makes the markup
+# harder to read without making it any safer.
+"**/infrastructure/email/messages.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["factory_core", "factory_api", "factory_worker"]

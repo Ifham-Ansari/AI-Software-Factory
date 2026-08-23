@@ -34,7 +34,7 @@ Email = Annotated[EmailStr, BeforeValidator(_normalise_email)]
 
 ProjectName = Annotated[str, Field(min_length=1, max_length=MAX_PROJECT_NAME_LENGTH)]
 ProjectDescription = Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)]
-Password = Annotated[str, Field(min_length=12, max_length=128)]
+Password = Annotated[str, Field(min_length=8, max_length=128)]
 
 _email_adapter: TypeAdapter[str] = TypeAdapter(Email)
 

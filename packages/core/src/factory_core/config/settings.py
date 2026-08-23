@@ -21,6 +21,7 @@ from typing import Annotated, Any, Literal
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from factory_core.config.email import EmailSettings, VerificationSettings
 from factory_core.config.environment import Environment
 from factory_core.config.integrations import (
     LangSmithSettings,
@@ -139,6 +140,8 @@ class Settings(BaseSettings):
 
     # Optional, and consumed by later phases. Present now so credentials have a redacted
     # home before the code that uses them exists. See config/integrations.py.
+    email: EmailSettings = Field(default_factory=EmailSettings)
+    verification: VerificationSettings = Field(default_factory=VerificationSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     langsmith: LangSmithSettings = Field(default_factory=LangSmithSettings)
@@ -161,6 +164,12 @@ class Settings(BaseSettings):
             problems.append("OBSERVABILITY__LOG_FORMAT must be 'json' in production")
         if self.database.echo:
             problems.append("DATABASE__ECHO must be false in production")
+        if self.email.transport == "console":
+            # The console transport writes the message body to the log, and the body
+            # contains a one-time code. That is a credential in a log aggregator.
+            problems.append(
+                "EMAIL__TRANSPORT must be 'smtp' in production; 'console' logs one-time codes"
+            )
         if problems:
             raise ValueError("; ".join(problems))
         return self
@@ -183,6 +192,7 @@ class Settings(BaseSettings):
         surface on the readiness endpoint, which is unauthenticated.
         """
         return {
+            "email": self.email.is_configured,
             "redis": self.redis.is_configured,
             "openai": self.openai.is_configured,
             "langsmith": self.langsmith.is_configured,
@@ -198,7 +208,12 @@ class Settings(BaseSettings):
             self.database.url.get_secret_value(),
             self.security.jwt_secret_key.get_secret_value(),
         ]
-        for optional in (self.redis.url, self.openai.api_key, self.langsmith.api_key):
+        for optional in (
+            self.redis.url,
+            self.openai.api_key,
+            self.langsmith.api_key,
+            self.email.smtp_password,
+        ):
             if optional is not None:
                 values.append(optional.get_secret_value())
         return values

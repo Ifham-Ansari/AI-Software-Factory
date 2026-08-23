@@ -40,6 +40,12 @@ class AuditAction(StrEnum):
     USER_SIGN_IN_FAILED = "user.sign_in_failed"
     USER_SIGNED_OUT = "user.signed_out"
 
+    # Email verification
+    VERIFICATION_SENT = "verification.sent"
+    VERIFICATION_SUCCEEDED = "verification.succeeded"
+    VERIFICATION_FAILED = "verification.failed"
+    VERIFICATION_EXHAUSTED = "verification.exhausted"
+
     # Tokens
     TOKEN_REFRESHED = "token.refreshed"
     TOKEN_REUSE_DETECTED = "token.reuse_detected"

@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from factory_core.domain.entities import User
 from factory_core.domain.values import Email
 
-MIN_PASSWORD_LENGTH = 12
+MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
 
 

@@ -4,6 +4,7 @@ from factory_core.persistence.base import Base
 from factory_core.persistence.engine import create_engine, dispose_engine
 from factory_core.persistence.models import (
     AuditLogRow,
+    EmailVerificationRow,
     ProjectRow,
     RefreshTokenRow,
     UserRow,
@@ -15,6 +16,7 @@ from factory_core.persistence.repositories import (
     Repository,
     ScopedRepository,
     UserRepository,
+    VerificationRepository,
 )
 from factory_core.persistence.session import (
     SessionFactory,
@@ -27,6 +29,7 @@ __all__ = [
     "AuditLogRow",
     "AuditRepository",
     "Base",
+    "EmailVerificationRow",
     "ProjectRepository",
     "ProjectRow",
     "RefreshTokenRepository",
@@ -36,6 +39,7 @@ __all__ = [
     "SessionFactory",
     "UserRepository",
     "UserRow",
+    "VerificationRepository",
     "create_engine",
     "create_session_factory",
     "dispose_engine",

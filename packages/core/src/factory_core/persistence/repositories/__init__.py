@@ -5,6 +5,7 @@ from factory_core.persistence.repositories.base import Repository, ScopedReposit
 from factory_core.persistence.repositories.projects import ProjectRepository
 from factory_core.persistence.repositories.refresh_tokens import RefreshTokenRepository
 from factory_core.persistence.repositories.users import UserRepository
+from factory_core.persistence.repositories.verifications import VerificationRepository
 
 __all__ = [
     "AuditRepository",
@@ -13,4 +14,5 @@ __all__ = [
     "Repository",
     "ScopedRepository",
     "UserRepository",
+    "VerificationRepository",
 ]

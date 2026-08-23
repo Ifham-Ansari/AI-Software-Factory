@@ -7,9 +7,11 @@ from factory_api.dependencies.auth import (
     get_current_user_id,
 )
 from factory_api.dependencies.context import (
+    EmailSenderDep,
     RequestIdDep,
     SessionDep,
     StateDep,
+    get_email_sender,
     get_session,
     get_state,
 )
@@ -18,15 +20,19 @@ from factory_api.dependencies.repositories import (
     AuditRepositoryDep,
     RefreshTokenRepositoryDep,
     UserRepositoryDep,
+    VerificationRepositoryDep,
     get_audit_repository,
     get_refresh_token_repository,
     get_user_repository,
+    get_verification_repository,
 )
 from factory_api.dependencies.services import (
     AuthServiceDep,
     ProjectRepositoryDep,
     ProjectServiceDep,
+    VerificationServiceDep,
     get_project_repository,
+    get_verification_service,
 )
 
 __all__ = [
@@ -34,6 +40,7 @@ __all__ = [
     "AuthServiceDep",
     "CurrentUser",
     "CurrentUserId",
+    "EmailSenderDep",
     "PageRequestDep",
     "ProjectRepositoryDep",
     "ProjectServiceDep",
@@ -42,12 +49,17 @@ __all__ = [
     "SessionDep",
     "StateDep",
     "UserRepositoryDep",
+    "VerificationRepositoryDep",
+    "VerificationServiceDep",
     "get_audit_repository",
     "get_current_user",
     "get_current_user_id",
+    "get_email_sender",
     "get_project_repository",
     "get_refresh_token_repository",
     "get_session",
     "get_state",
     "get_user_repository",
+    "get_verification_repository",
+    "get_verification_service",
 ]

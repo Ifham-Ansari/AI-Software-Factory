@@ -84,10 +84,31 @@ class FakeUserRepository:
         self.hashes[user_id] = password_hash
         return user
 
-    async def update_password_hash(self, user_id: UserId, password_hash: str) -> None:
+    async def update_password_hash(
+        self, user_id: UserId, password_hash: str, *, now: datetime | None = None
+    ) -> None:
         """Replace a stored password hash."""
         if user_id in self.hashes:
             self.hashes[user_id] = password_hash
+
+    async def mark_email_verified(
+        self, user_id: UserId, *, now: datetime | None = None
+    ) -> User | None:
+        """Record that a user has proven ownership of their address."""
+        user = self.users.get(user_id)
+        if user is None:
+            return None
+        if user.email_verified_at is None:
+            user = user.model_copy(update={"email_verified_at": now or datetime.now(UTC)})
+            self.users[user_id] = user
+        return user
+
+    def verify(self, user_id: UserId) -> None:
+        """Test helper: mark an account verified without going through a code."""
+        user = self.users[user_id]
+        self.users[user_id] = user.model_copy(
+            update={"email_verified_at": datetime.now(UTC)}
+        )
 
     def suspend(self, user_id: UserId) -> None:
         """Test helper: mark an account suspended."""
