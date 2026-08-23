@@ -1,7 +1,6 @@
 # Feature Registry — AI Software Factory
 
-> **Phase 1 is implemented: 14 features `VERIFIED`, 4 `TESTING` (awaiting a CI run
-> with a real database). Phases 2-8 remain `PLANNED`.**
+> **Phase 1 is complete: all 18 features `VERIFIED`. Phases 2-8 remain `PLANNED`.**
 > This registry is the single source of truth for what exists. It is updated during a phase, not
 > after it. See [instructions.md](instructions.md) §4 for the update protocol.
 
@@ -34,30 +33,31 @@ registry is corrected — the registry follows the code, not the other way aroun
 
 ## Phase 1 — Platform Foundation & Contracts
 
-> **Phase 1 verification status.** 14 of 18 features are `VERIFIED`: their tests ran and
-> passed on the implementation machine (313 backend tests, 32 frontend tests).
+> **Phase 1 verification status.** All 18 features are `VERIFIED` — every one has a test
+> that ran and passed, against real infrastructure:
 >
-> Four are `TESTING` — implemented, with tests written, but their proof is the integration
-> suite, which requires a real PostgreSQL via `TEST_DATABASE_URL` and **skipped locally**
-> (37 tests) because no database was available. That suite runs in CI, where the workflow
-> provisions `postgres:17`. They move to `VERIFIED` on the first green CI run.
+> | Suite | Count | Environment |
+> |---|---|---|
+> | Backend (unit, integration, security, failure) | 355 | Real PostgreSQL (Neon), 0 skipped |
+> | Frontend component and validation | 32 | jsdom |
+> | End-to-end (Playwright) | 10 | Full stack: Next.js + FastAPI + PostgreSQL |
 >
-> The Playwright end-to-end suite (10 specs) is in the same position: written, and run by
-> CI against the full stack, but not executed locally.
+> Backend coverage is 93% on `packages/core` against a gate of 85%.
 >
-> This distinction is the point of the status field. See [instructions.md](instructions.md) §4.
+> The integration suite runs against a dedicated throwaway database, never the application
+> one. See [README.md](README.md#test) for how to point it at yours.
 
 | ID | Feature | Status | Depends | Location | Tests | Acceptance |
 |---|---|---|---|---|---|---|
 | F-101 | Monorepo & toolchain (uv + pnpm workspaces, ruff, mypy strict, import-linter, ESLint) | VERIFIED | — | repo root, `pyproject.toml`, `pnpm-workspace.yaml` | CI lint/type jobs | Clean clone installs and lints on Windows and Linux |
 | F-102 | Layered configuration (Pydantic Settings, env layering, PUBLIC/SECRET split) | VERIFIED | F-101 | `packages/core/config/` | unit | Missing required var aborts startup naming the variable |
-| F-103 | Async persistence layer (psycopg3 engine, session, unit of work) | TESTING | F-102 | `packages/core/persistence/` | unit + integration | Session commits/rolls back correctly under concurrency |
-| F-104 | Alembic migrations | TESTING | F-103 | `packages/core/migrations/` | integration | `upgrade head` and `downgrade base` both succeed clean |
-| F-105 | Scoped repository pattern | TESTING | F-103 | `packages/core/persistence/repositories/` | unit + integration | Repository cannot be constructed without a scope |
+| F-103 | Async persistence layer (psycopg3 engine, session, unit of work) | VERIFIED | F-102 | `packages/core/persistence/` | unit + integration | Session commits/rolls back correctly under concurrency |
+| F-104 | Alembic migrations | VERIFIED | F-103 | `packages/core/migrations/` | integration | `upgrade head` and `downgrade base` both succeed clean |
+| F-105 | Scoped repository pattern | VERIFIED | F-103 | `packages/core/persistence/repositories/` | unit + integration | Repository cannot be constructed without a scope |
 | F-106 | User registration & Argon2id hashing | VERIFIED | F-105 | `packages/core/security/`, `apps/api/routers/auth.py` | unit + integration | Duplicate email rejected; hash never returned |
 | F-107 | JWT access + rotating refresh tokens with reuse detection | VERIFIED | F-106 | `packages/core/security/tokens.py` | unit + integration + failure | Reused refresh token revokes the whole family |
 | F-108 | Authorization guard & project ownership | VERIFIED | F-107 | `apps/api/dependencies/` | integration + failure | Cross-user access returns 404, not 403 |
-| F-109 | Audit log writer | TESTING | F-108 | `packages/core/domain/audit/` | integration | Every mutating action writes an attributable row |
+| F-109 | Audit log writer | VERIFIED | F-108 | `packages/core/domain/audit/` | integration | Every mutating action writes an attributable row |
 | F-110 | Project CRUD | VERIFIED | F-108 | `packages/core/application/projects/` | unit + integration + e2e | Full lifecycle works and is owner-scoped |
 | F-111 | API error envelope & stable error codes | VERIFIED | F-102 | `apps/api/errors.py` | unit + failure | No unhandled exception leaks a stack trace |
 | F-112 | Request-ID correlation middleware | VERIFIED | F-111 | `apps/api/middleware/` | integration | Every log line in a request carries its request ID |
@@ -218,7 +218,7 @@ registry is corrected — the registry follows the code, not the other way aroun
 
 | Phase | Features | VERIFIED | Status |
 |---|---|---|---|
-| 1 — Platform Foundation | 18 | 14 | **IMPLEMENTED** (4 awaiting CI database) |
+| 1 — Platform Foundation | 18 | 18 | **COMPLETE** |
 | 2 — Secrets & Realtime | 16 | 0 | NOT STARTED |
 | 3 — Agent Runtime & Intake | 17 | 0 | NOT STARTED |
 | 4 — Hierarchical Supervision | 17 | 0 | NOT STARTED |
@@ -226,7 +226,7 @@ registry is corrected — the registry follows the code, not the other way aroun
 | 6 — Verification & Recovery | 12 | 0 | NOT STARTED |
 | 7 — Database & Deployment | 17 | 0 | NOT STARTED |
 | 8 — Evaluation & Hardening | 15 | 0 | NOT STARTED |
-| **Total** | **127** | **14** | **Phase 1 implemented** |
+| **Total** | **127** | **18** | **Phase 1 complete** |
 
 ---
 
@@ -242,4 +242,5 @@ the date, and the superseding ID. Never delete a row and never reuse an ID.
 | Date | Change |
 |---|---|
 | 2026-08-23 | Registry created. 127 features across 8 phases, all `PLANNED`. |
-| 2026-08-23 | Phase 1 implemented. 14 features `VERIFIED`; F-103/104/105/109 `TESTING` pending a CI run with PostgreSQL. |
+| 2026-08-23 | Phase 1 implemented. 14 features `VERIFIED`; F-103/104/105/109 `TESTING` pending a database. |
+| 2026-08-23 | Integration and e2e suites executed against real infrastructure. All 18 Phase 1 features `VERIFIED`. |

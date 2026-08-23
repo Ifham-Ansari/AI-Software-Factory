@@ -29,29 +29,14 @@ Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 def _register_secrets(settings: Settings) -> None:
     """Teach the redactor every secret this process holds.
 
-    Registered as whole values *and* as the password component of the database URL: a
-    driver error commonly echoes just the password, not the entire connection string.
+    Sourced from ``Settings.secret_values()`` so that adding a credential to configuration
+    protects it automatically. A secret that is configured but never registered here is a
+    secret that can reach a log line.
+
+    The redactor also derives the password component of any credentialed URL it is
+    given, so a driver error echoing just the password is caught too.
     """
-    redactor = get_redactor()
-    database_url = settings.database.url.get_secret_value()
-    redactor.register(
-        database_url,
-        settings.security.jwt_secret_key.get_secret_value(),
-    )
-    password = _url_password(database_url)
-    if password:
-        redactor.register(password)
-
-
-def _url_password(url: str) -> str | None:
-    """Extract the password from a connection URL, if it has one."""
-    _, separator, remainder = url.partition("://")
-    if not separator or "@" not in remainder:
-        return None
-    credentials = remainder.split("@", 1)[0]
-    if ":" not in credentials:
-        return None
-    return credentials.split(":", 1)[1] or None
+    get_redactor().register(*settings.secret_values())
 
 
 def build_lifespan(settings: Settings) -> Lifespan:
@@ -76,6 +61,8 @@ def build_lifespan(settings: Settings) -> Lifespan:
             "api.started",
             environment=settings.environment.value,
             docs_enabled=settings.api.docs_enabled,
+            # Booleans only — which optional services are configured, never their values.
+            integrations=settings.configured_integrations(),
         )
         try:
             yield

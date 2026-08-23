@@ -13,8 +13,18 @@ import "server-only";
 /** Base URL of the FastAPI backend, reachable only from the Next.js server. */
 export const API_BASE_URL = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
-/** How long a fetch to the backend may take before it is abandoned. */
-export const API_TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS ?? 10_000);
+/**
+ * How long a fetch to the backend may take before it is abandoned.
+ *
+ * Generous by default. A write path is several database round trips plus a deliberately
+ * slow password hash, and against a geographically distant or serverless database that
+ * adds up: registration measured 7-10s with the database in another region. A timeout
+ * tuned for a local database turns a slow-but-working signup into a hard failure.
+ *
+ * It still exists, and still matters: without it a hung backend would hold a Next.js
+ * request open until the platform's own timeout fired, exhausting server capacity.
+ */
+export const API_TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS ?? 30_000);
 
 /**
  * Whether cookies require HTTPS.

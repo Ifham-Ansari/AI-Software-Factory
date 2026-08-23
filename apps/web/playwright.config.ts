@@ -28,8 +28,10 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
-  timeout: 30_000,
-  expect: { timeout: 10_000 },
+  // A registration round trip against a remote database can take ~10s, so the
+  // per-assertion timeout has to clear that or the suite fails on latency alone.
+  timeout: 60_000,
+  expect: { timeout: 20_000 },
 
   use: {
     baseURL: BASE_URL,

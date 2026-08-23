@@ -22,12 +22,9 @@ async def _run() -> None:
         log_format=settings.observability.log_format,
         service_name="factory-worker",
     )
-    # Same guarantee as the API: configuration secrets are known to the redactor before
-    # anything can log them.
-    get_redactor().register(
-        settings.database.url.get_secret_value(),
-        settings.security.jwt_secret_key.get_secret_value(),
-    )
+    # Same guarantee as the API, from the same source: every configured secret is known
+    # to the redactor before anything can log it.
+    get_redactor().register(*settings.secret_values())
 
     worker = Worker(settings)
     install_signal_handlers(worker, asyncio.get_running_loop())

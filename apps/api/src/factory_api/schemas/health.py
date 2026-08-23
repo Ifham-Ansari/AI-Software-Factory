@@ -40,12 +40,20 @@ class ReadinessResponse(BaseModel):
 
     status: str
     dependencies: list[DependencyResponse]
+    integrations: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Which optional external services have credentials configured. "
+        "Booleans only — this endpoint is unauthenticated.",
+    )
 
     @classmethod
-    def from_report(cls, report: HealthReport) -> ReadinessResponse:
+    def from_report(
+        cls, report: HealthReport, integrations: dict[str, bool] | None = None
+    ) -> ReadinessResponse:
         """Project a health report onto its wire representation."""
         return cls(
             status=report.status.value,
+            integrations=integrations or {},
             dependencies=[
                 DependencyResponse(
                     name=dependency.name,

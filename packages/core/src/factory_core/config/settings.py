@@ -16,13 +16,18 @@ conventionally have well-known names (``DATABASE_URL``, ``JWT_SECRET_KEY``).
 
 from __future__ import annotations
 
-import json
 from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from factory_core.config.environment import Environment
+from factory_core.config.integrations import (
+    LangSmithSettings,
+    OpenAISettings,
+    RedisSettings,
+)
+from factory_core.config.service import ApiSettings, ObservabilitySettings
 
 _MIN_SECRET_LENGTH = 32
 
@@ -115,54 +120,6 @@ class SecuritySettings(BaseSettings):
         return value
 
 
-class ObservabilitySettings(BaseSettings):
-    """Logging and tracing."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="OBSERVABILITY__", env_file=".env", extra="ignore", case_sensitive=False
-    )
-
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    log_format: Literal["json", "console"] = "json"
-    service_name: str = "factory-api"
-    otel_enabled: bool = False
-    otel_endpoint: str | None = None
-
-
-class ApiSettings(BaseSettings):
-    """HTTP surface configuration."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="API__", env_file=".env", extra="ignore", case_sensitive=False
-    )
-
-    host: str = "127.0.0.1"
-    port: int = Field(default=8000, ge=1, le=65535)
-    root_path: str = ""
-    # NoDecode suppresses Pydantic Settings' automatic JSON parsing of complex types.
-    # Without it the raw env string is JSON-decoded before any validator runs, so a
-    # plain comma-separated value raises a JSONDecodeError instead of reaching _split_csv.
-    cors_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000"]
-    )
-    docs_enabled: bool = True
-
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _split_csv(cls, value: Any) -> Any:
-        """Accept a comma-separated string as well as a JSON list.
-
-        Deployment platforms overwhelmingly supply plain strings for env vars.
-        """
-        if isinstance(value, str):
-            text = value.strip()
-            if text.startswith("["):
-                parsed = json.loads(text)
-                return [str(origin).strip() for origin in parsed]
-            return [origin.strip() for origin in text.split(",") if origin.strip()]
-        return value
-
-
 class Settings(BaseSettings):
     """Root settings object. Construct via ``factory_core.config.get_settings()``."""
 
@@ -179,6 +136,12 @@ class Settings(BaseSettings):
     security: SecuritySettings
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     api: ApiSettings = Field(default_factory=ApiSettings)
+
+    # Optional, and consumed by later phases. Present now so credentials have a redacted
+    # home before the code that uses them exists. See config/integrations.py.
+    redis: RedisSettings = Field(default_factory=RedisSettings)
+    openai: OpenAISettings = Field(default_factory=OpenAISettings)
+    langsmith: LangSmithSettings = Field(default_factory=LangSmithSettings)
 
     @model_validator(mode="after")
     def _enforce_production_hardening(self) -> Settings:
@@ -212,3 +175,30 @@ class Settings(BaseSettings):
             "service_name": self.observability.service_name,
             "docs_enabled": self.api.docs_enabled,
         }
+
+    def configured_integrations(self) -> dict[str, bool]:
+        """Which optional external services have credentials.
+
+        Booleans only — never the credentials themselves. Safe to log at startup and to
+        surface on the readiness endpoint, which is unauthenticated.
+        """
+        return {
+            "redis": self.redis.is_configured,
+            "openai": self.openai.is_configured,
+            "langsmith": self.langsmith.is_configured,
+        }
+
+    def secret_values(self) -> list[str]:
+        """Every secret this process holds, for registration with the redactor.
+
+        Central so that adding a credential to configuration automatically protects it.
+        A secret that is configured but never registered here is one that can reach a log.
+        """
+        values: list[str] = [
+            self.database.url.get_secret_value(),
+            self.security.jwt_secret_key.get_secret_value(),
+        ]
+        for optional in (self.redis.url, self.openai.api_key, self.langsmith.api_key):
+            if optional is not None:
+                values.append(optional.get_secret_value())
+        return values

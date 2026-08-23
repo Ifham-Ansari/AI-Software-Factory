@@ -90,12 +90,22 @@ class SecretRedactor:
     def register(self, *values: str | None) -> None:
         """Register literal secret values to redact on sight.
 
-        Values shorter than the minimum length are ignored: matching them literally
-        would corrupt unrelated log output without meaningfully protecting anything.
+        A value that looks like a URL with credentials also registers its password
+        component on its own. Driver and client errors frequently echo just the password
+        rather than the whole connection string, and registering the full URL would not
+        match that.
+
+        Values shorter than the minimum length are ignored: matching them literally would
+        corrupt unrelated log output without meaningfully protecting anything.
         """
         for value in values:
-            if value and len(value) >= _MIN_LITERAL_LENGTH:
+            if not value:
+                continue
+            if len(value) >= _MIN_LITERAL_LENGTH:
                 self._known.add(value)
+            password = url_password(value)
+            if password and len(password) >= _MIN_LITERAL_LENGTH:
+                self._known.add(password)
 
     def clear(self) -> None:
         """Forget every registered value. Intended for test isolation."""
@@ -137,6 +147,21 @@ class SecretRedactor:
             cleaned = [self.redact(item) for item in value]
             return type(value)(cleaned) if isinstance(value, (list, tuple)) else set(cleaned)
         return value
+
+
+def url_password(url: str) -> str | None:
+    """Extract the password from a connection URL, if it has one.
+
+    Returns ``None`` for anything that is not a credentialed URL, so it is safe to call on
+    every registered value without the caller checking first.
+    """
+    scheme, separator, remainder = url.partition("://")
+    if not separator or "@" not in remainder or " " in scheme:
+        return None
+    credentials = remainder.split("@", 1)[0]
+    if ":" not in credentials:
+        return None
+    return credentials.split(":", 1)[1] or None
 
 
 def _replace_match(match: re.Match[str]) -> str:

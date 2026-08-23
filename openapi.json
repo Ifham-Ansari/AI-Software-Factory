@@ -388,6 +388,14 @@
             "title": "Dependencies",
             "type": "array"
           },
+          "integrations": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Which optional external services have credentials configured. Booleans only \u2014 this endpoint is unauthenticated.",
+            "title": "Integrations",
+            "type": "object"
+          },
           "status": {
             "title": "Status",
             "type": "string"

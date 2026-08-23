@@ -122,6 +122,7 @@ class ProjectRepository(ScopedRepository):
         name: str | None = None,
         slug: str | None = None,
         description: str | None = None,
+        now: datetime | None = None,
     ) -> Project | None:
         """Apply a partial update to one of this owner's projects."""
         row = await self._scoped_row(project_id)
@@ -133,6 +134,7 @@ class ProjectRepository(ScopedRepository):
             row.slug = slug
         if description is not None:
             row.description = description
+        row.updated_at = now or datetime.now(UTC)
         await self._session.flush()
         return to_project(row)
 
@@ -143,8 +145,10 @@ class ProjectRepository(ScopedRepository):
         row = await self._scoped_row(project_id)
         if row is None:
             return None
+        timestamp = now or datetime.now(UTC)
         row.status = ProjectStatus.ARCHIVED.value
-        row.archived_at = now or datetime.now(UTC)
+        row.archived_at = timestamp
+        row.updated_at = timestamp
         await self._session.flush()
         return to_project(row)
 

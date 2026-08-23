@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 /** Project lifecycle and cross-user isolation, driven through the browser. */
 
 function uniqueEmail(): string {
-  return `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`;
+  return `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
 }
 
 const PASSWORD = "an-e2e-passphrase-long-enough";
@@ -73,7 +73,7 @@ test.describe("project lifecycle", () => {
     await page.getByLabel("Name").fill("   ");
     await page.getByRole("button", { name: "Create project" }).click();
 
-    await expect(page.getByRole("alert").first()).toBeVisible();
+    await expect(page.getByText("Project name is required")).toBeVisible();
     await expect(page.getByTestId("project-card")).toHaveCount(0);
   });
 });
@@ -90,6 +90,9 @@ test.describe("isolation", () => {
       await registerAndSignIn(owner, "Owner");
       await createProject(owner, "Private Project");
       await owner.getByRole("link", { name: "Private Project" }).click();
+      // Wait for the navigation to land before reading the URL. `click()` resolves as
+      // soon as the click is dispatched, so reading it immediately captures /projects.
+      await expect(owner).toHaveURL(/\/projects\/[0-9a-f-]{36}$/);
       const projectUrl = owner.url();
 
       await registerAndSignIn(stranger, "Stranger");

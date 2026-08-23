@@ -1016,6 +1016,44 @@ Access tokens are short precisely *because* they are stateless: revocation is no
 so the long-lived half of a session is the stateful, rotating refresh token, where theft is
 detectable (§8.2 of the security model, and `factory_core.security.refresh`).
 
+### 15.2 External-service configuration, ahead of its consumers
+
+Configuration for Redis (Phase 2), OpenAI and LangSmith (Phase 3) exists today, in
+`factory_core.config.integrations`. The clients that use them do not.
+
+That ordering is deliberate. A credential needs a correct home *before* the code that
+consumes it is written: a `SecretStr` field is registered with the redactor at startup, so
+the value cannot reach a log line, a trace, or an error body. A hasty `os.environ` lookup
+added in Phase 3 has none of that protection, and by then the habit is set.
+
+Every section is optional and blank-tolerant — an empty `REDIS_URL=` left over from the
+template means "not configured", not "configured with an empty URL". `Settings.secret_values()`
+is the single source the redactor registers from, so adding a credential protects it
+automatically. `Settings.configured_integrations()` returns booleans only, which is what
+`/ready` exposes; it is unauthenticated, so it never reveals a host or a key.
+
+### 15.3 Two findings that cost real time
+
+Recorded because both present as something they are not.
+
+**psycopg cannot use Windows' default event loop, and uvicorn ignores the asyncio policy.**
+Since Python 3.8 Windows defaults to `ProactorEventLoop`, which psycopg's async mode
+rejects. Setting `asyncio.set_event_loop_policy(...)` fixes the worker and the test suite —
+and does nothing for the API server, because uvicorn selects its loop through an internal
+factory that hard-codes `ProactorEventLoop` on Windows. The result is a green test suite and
+a server that cannot reach the database, failing with an `InterfaceError` that reads like a
+network problem. `factory_core.runtime` provides both a policy and an explicit loop factory;
+the API entrypoint, the worker entrypoint and Alembic's `env.py` each own their loop.
+
+**A readiness timeout tuned for a local database rejects a working remote one.** The probe
+opens a fresh connection, and against a serverless or geographically distant database that
+handshake alone can take seconds. A five-second budget reported a perfectly healthy database
+as down. The timeout is now configuration (`API__HEALTH_TIMEOUT_SECONDS`, default 15s) and
+the reported `latency_ms` is always real elapsed time, so the next person sees *why* rather
+than guessing. Note also that the timeout bounds when a probe is abandoned, not total wall
+time: cancelling an in-flight query asks the driver to cancel server-side, and that can
+itself block.
+
 ---
 
 ## 16. Known risks
@@ -1040,3 +1078,4 @@ detectable (§8.2 of the security model, and `factory_core.security.refresh`).
 |---|---|
 | 2026-08-23 | Initial architecture of record. No implementation yet. |
 | 2026-08-23 | Phase 1 implemented. §3.0 and §9.1 describe as-built state; auth transport recorded in §15.1. |
+| 2026-08-23 | Phase 1 verified against real infrastructure. External-service config (§15.2) and two runtime findings (§15.3) recorded. |

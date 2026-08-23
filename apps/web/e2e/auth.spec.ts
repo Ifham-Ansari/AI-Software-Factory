@@ -5,9 +5,15 @@ import { expect, test } from "@playwright/test";
  * register → create a project → see it listed → sign out → session rejected.
  */
 
-/** A fresh address per test, so parallel runs never contend for one account. */
+/**
+ * A fresh address per test, so parallel runs never contend for one account.
+ *
+ * ``example.com`` rather than ``.test``: the API validates deliverability, and reserved
+ * TLDs like ``.test`` are rejected because no address under them can receive mail.
+ * ``example.com`` is the reserved documentation domain and passes.
+ */
 function uniqueEmail(): string {
-  return `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`;
+  return `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
 }
 
 const PASSWORD = "an-e2e-passphrase-long-enough";
@@ -80,7 +86,9 @@ test.describe("authentication", () => {
     await page.getByLabel("Password").fill("the-wrong-passphrase");
     await page.getByRole("button", { name: "Sign in" }).click();
 
-    await expect(page.getByRole("alert")).toContainText("Invalid email or password");
+    // Not getByRole("alert"): Next.js's route announcer also carries role="alert",
+    // which makes that locator ambiguous. Match the message itself.
+    await expect(page.getByText("Invalid email or password.")).toBeVisible();
     await expect(page).toHaveURL(/\/login$/);
   });
 

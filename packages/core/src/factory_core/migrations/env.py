@@ -4,14 +4,16 @@ The connection string comes from application settings rather than ``alembic.ini`
 migrations and the running application can never disagree about which database they mean,
 and so no credential is stored in a committed file.
 
-``TEST_DATABASE_URL`` takes precedence when set. That is what lets the integration suite
-migrate a throwaway database without touching a developer's real one.
+A caller may override the target by setting ``sqlalchemy.url`` on the Alembic config —
+that is how the integration suite points migrations at a throwaway database. It is
+deliberately *not* an environment variable: ``TEST_DATABASE_URL`` lives in ``.env`` on
+developer machines, and letting it win here would silently redirect an ordinary
+``alembic upgrade head`` away from the application database.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -21,6 +23,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from factory_core.config import DatabaseSettings
 from factory_core.persistence.base import Base
+from factory_core.runtime import configure_event_loop, event_loop_factory
 
 # Importing the models module registers every table on Base.metadata. Without it,
 # autogenerate would see an empty schema and cheerfully write a migration dropping
@@ -38,10 +41,16 @@ target_metadata = Base.metadata
 def _database_url() -> str:
     """Resolve the URL to migrate.
 
-    Reuses ``DatabaseSettings`` so the psycopg-driver normalisation and validation apply
-    here exactly as they do at application startup.
+    Precedence:
+
+    1. ``sqlalchemy.url`` on the Alembic config, set programmatically by a caller such as
+       the integration suite.
+    2. ``DATABASE_URL`` from application settings.
+
+    Either way the value goes through ``DatabaseSettings``, so psycopg-driver
+    normalisation and validation apply exactly as they do at application startup.
     """
-    override = os.environ.get("TEST_DATABASE_URL")
+    override = config.get_main_option("sqlalchemy.url", None)
     if override:
         return DatabaseSettings(url=override).url.get_secret_value()  # type: ignore[arg-type]
     return DatabaseSettings().url.get_secret_value()  # type: ignore[call-arg]
@@ -105,4 +114,9 @@ async def run_migrations_online() -> None:
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    asyncio.run(run_migrations_online())
+    # The Alembic CLI creates the loop itself, so the fix that the API and worker
+    # entrypoints apply does not reach here. psycopg cannot use Windows' default
+    # ProactorEventLoop, and without this `alembic upgrade head` fails on Windows with an
+    # InterfaceError that reads like a connectivity problem.
+    configure_event_loop()
+    asyncio.run(run_migrations_online(), loop_factory=event_loop_factory())

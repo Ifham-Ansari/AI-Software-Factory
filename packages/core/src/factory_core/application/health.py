@@ -112,6 +112,12 @@ class HealthService:
         can hang for minutes, and a readiness endpoint that hangs is worse than one that
         reports failure: the orchestrator's own timeout fires, the probe is recorded as a
         failure anyway, and nobody learns which dependency was at fault.
+
+        It bounds when the probe is *abandoned*, not total wall time. Cancelling an
+        in-flight query asks the driver to cancel server-side, and that cancellation can
+        itself block — so a probe may return somewhat later than the timeout. The reported
+        ``latency_ms`` is the real elapsed time, not the timeout value, which is what makes
+        that visible rather than mysterious.
         """
         started = time.perf_counter()
         try:

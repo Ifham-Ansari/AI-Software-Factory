@@ -36,7 +36,7 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Mypy (strict)
-        run: uv run mypy packages/core/src apps/api/src apps/worker/src
+        run: uv run mypy packages/core/src apps/api/src apps/worker/src scripts
 
       # Layering is enforced here, not by convention: core must not import a web
       # framework, and the API and worker must stay independent processes.
@@ -206,37 +206,51 @@ jobs:
 
       - run: uv run alembic upgrade head
 
+      # nohup + setsid detaches the server from this step's shell, so it survives when
+      # the step ends. A plain `&` leaves it a child of a shell that is about to exit.
       - name: Start the API
         run: |
-          uv run uvicorn factory_api.main:create_app --factory --host 127.0.0.1 --port 8000 &
-          for i in $(seq 1 60); do
+          nohup uv run uvicorn factory_api.main:create_app --factory             --host 127.0.0.1 --port 8000 > /tmp/api.log 2>&1 &
+          for _ in $(seq 1 60); do
             if curl -sf http://127.0.0.1:8000/health > /dev/null; then
               echo "API is healthy"
-              exit 0
+              break
             fi
             sleep 1
           done
-          echo "::error::API did not become healthy within 60s"
-          exit 1
+          if ! curl -sf http://127.0.0.1:8000/health > /dev/null; then
+            echo "::error::API did not become healthy within 60s"
+            cat /tmp/api.log
+            exit 1
+          fi
 
       - name: Build and start the web app
         run: |
           pnpm --filter web build
-          pnpm --filter web start --port 3000 &
-          for i in $(seq 1 60); do
+          nohup pnpm --filter web start --port 3000 > /tmp/web.log 2>&1 &
+          for _ in $(seq 1 60); do
             if curl -sf http://127.0.0.1:3000/login > /dev/null; then
               echo "Web app is healthy"
-              exit 0
+              break
             fi
             sleep 1
           done
-          echo "::error::Web app did not become healthy within 60s"
-          exit 1
+          if ! curl -sf http://127.0.0.1:3000/login > /dev/null; then
+            echo "::error::Web app did not become healthy within 60s"
+            cat /tmp/web.log
+            exit 1
+          fi
 
       - run: pnpm --filter web exec playwright install --with-deps chromium
 
       - name: Playwright
         run: pnpm --filter web test:e2e
+
+      - name: Server logs on failure
+        if: failure()
+        run: |
+          echo "--- API ---"; tail -100 /tmp/api.log || true
+          echo "--- WEB ---"; tail -100 /tmp/web.log || true
 
       - uses: actions/upload-artifact@v4
         if: failure()

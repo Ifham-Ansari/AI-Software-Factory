@@ -18,19 +18,22 @@ from functools import lru_cache
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_settings import BaseSettings
 
-from factory_core.config.settings import (
-    ApiSettings,
-    DatabaseSettings,
-    ObservabilitySettings,
-    SecuritySettings,
-    Settings,
+from factory_core.config.integrations import (
+    LangSmithSettings,
+    OpenAISettings,
+    RedisSettings,
 )
+from factory_core.config.service import ApiSettings, ObservabilitySettings
+from factory_core.config.settings import DatabaseSettings, SecuritySettings, Settings
 from factory_core.errors import ConfigurationError
 
 # Fields whose conventional flat env name differs from the prefixed path.
 _FLAT_ALIASES: dict[str, str] = {
     "DATABASE__URL": "DATABASE_URL",
     "SECURITY__JWT_SECRET_KEY": "JWT_SECRET_KEY",
+    "REDIS__URL": "REDIS_URL",
+    "OPENAI__API_KEY": "OPENAI_API_KEY",
+    "LANGSMITH__API_KEY": "LANGSMITH_API_KEY",
 }
 
 
@@ -92,6 +95,11 @@ def load_settings() -> Settings:
     security = _build(SecuritySettings, "SECURITY__", problems)
     observability = _build(ObservabilitySettings, "OBSERVABILITY__", problems)
     api = _build(ApiSettings, "API__", problems)
+    # Optional sections. Built here rather than left to default_factory so a malformed
+    # value reports its own variable name instead of surfacing as an opaque root error.
+    redis = _build(RedisSettings, "REDIS__", problems)
+    openai = _build(OpenAISettings, "OPENAI__", problems)
+    langsmith = _build(LangSmithSettings, "LANGSMITH__", problems)
 
     if problems:
         raise ConfigurationError(_format(problems))
@@ -100,6 +108,9 @@ def load_settings() -> Settings:
     assert security is not None
     assert observability is not None
     assert api is not None
+    assert redis is not None
+    assert openai is not None
+    assert langsmith is not None
 
     try:
         return Settings(
@@ -107,6 +118,9 @@ def load_settings() -> Settings:
             security=security,
             observability=observability,
             api=api,
+            redis=redis,
+            openai=openai,
+            langsmith=langsmith,
         )
     except PydanticValidationError as exc:
         raise ConfigurationError(_format(_collect("", exc))) from exc

@@ -41,7 +41,7 @@ def _pnpm() -> str | None:
 def _stream(name: str, process: subprocess.Popen[str]) -> None:
     """Forward one process's output, prefixed with its name."""
     colour = PREFIXES.get(name, "")
-    assert process.stdout is not None  # noqa: S101 - guaranteed by the Popen call below
+    assert process.stdout is not None
     for line in process.stdout:
         sys.stdout.write(f"{colour}[{name}]{RESET} {line}")
         sys.stdout.flush()

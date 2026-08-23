@@ -1,8 +1,8 @@
 # Implementation Plan — AI Software Factory
 
-> **Current status: PHASE 1 IMPLEMENTED.**
-> 14 of 18 Phase 1 features are `VERIFIED`; 4 are `TESTING`, pending a CI run with a
-> real database. Phases 2-8 are not started.
+> **Current status: PHASE 1 COMPLETE.**
+> All 18 Phase 1 features are `VERIFIED` against real infrastructure. Phases 2-8 are
+> not started.
 > This file is the roadmap of record and must be updated at the end of every phase.
 
 **Companion documents:** [architecture.md](architecture.md) · [features.md](features.md) ·
@@ -186,6 +186,12 @@ psycopg's async mode cannot use Windows' default `ProactorEventLoop`, and uvicor
 its loop through a factory that ignores the asyncio policy. Setting the policy alone fixes
 the tests and leaves the API server broken. Both mechanisms are needed; see the module
 docstring.
+
+**External-service configuration landed early.** Redis, OpenAI and LangSmith settings
+exist in `factory_core.config.integrations` even though Phases 2 and 3 consume them. A
+credential needs a redacted home before the code that uses it is written — a `SecretStr`
+field is registered with the redactor at startup, whereas an `os.environ` lookup added
+hastily later has no such protection. Only configuration was built; no client.
 
 **Test fakes ship inside the package.** `factory_core.testing` is production-packaged test
 support so `packages/core` and `apps/api` share one implementation of each fake. Two copies
@@ -653,7 +659,7 @@ Full records land in `docs/adr/` during implementation. Summary of what is alrea
 
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
-| 1 — Platform Foundation | **IMPLEMENTED** | 2026-08-23 | 2026-08-23 | 313 backend + 32 frontend tests pass. 37 integration and 10 e2e tests require CI infrastructure. |
+| 1 — Platform Foundation | **COMPLETE** | 2026-08-23 | 2026-08-23 | 355 backend (93% cov) + 32 frontend + 10 e2e, all passing against real PostgreSQL. |
 | 2 — Secrets & Realtime | NOT STARTED | — | — | |
 | 3 — Agent Runtime & Intake | NOT STARTED | — | — | |
 | 4 — Hierarchical Supervision | NOT STARTED | — | — | |
@@ -684,3 +690,4 @@ deployment.
 |---|---|
 | 2026-08-23 | Initial plan. Eight phases defined. No implementation started. |
 | 2026-08-23 | Phase 1 implemented. Deviations recorded in §4.1. |
+| 2026-08-23 | Phase 1 verified end to end against real PostgreSQL. All 18 features `VERIFIED`. |

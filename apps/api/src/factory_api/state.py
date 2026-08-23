@@ -43,7 +43,7 @@ def build_state(settings: Settings) -> AppState:
     engine = create_engine(settings.database, application_name="factory-api")
     session_factory = create_session_factory(engine)
 
-    health = HealthService()
+    health = HealthService(timeout_seconds=settings.api.health_timeout_seconds)
     health.register("database", _database_probe(session_factory))
 
     return AppState(

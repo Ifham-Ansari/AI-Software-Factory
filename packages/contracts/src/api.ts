@@ -458,6 +458,13 @@ export interface components {
         ReadinessResponse: {
             /** Dependencies */
             dependencies: components["schemas"]["DependencyResponse"][];
+            /**
+             * Integrations
+             * @description Which optional external services have credentials configured. Booleans only — this endpoint is unauthenticated.
+             */
+            integrations?: {
+                [key: string]: boolean;
+            };
             /** Status */
             status: string;
         };

@@ -81,7 +81,9 @@ class UserRepository(Repository):
         await self._session.flush()
         return to_user(row)
 
-    async def update_password_hash(self, user_id: UserId, password_hash: str) -> None:
+    async def update_password_hash(
+        self, user_id: UserId, password_hash: str, *, now: datetime | None = None
+    ) -> None:
         """Replace a stored password hash.
 
         Used to upgrade a hash to stronger parameters after a successful sign-in.
@@ -90,6 +92,7 @@ class UserRepository(Repository):
         if row is None:
             return
         row.password_hash = password_hash
+        row.updated_at = now or datetime.now(UTC)
         await self._session.flush()
 
     async def _row_by_email(self, email: str) -> UserRow | None:

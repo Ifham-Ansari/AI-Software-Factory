@@ -60,12 +60,21 @@ def created_at_column() -> Mapped[datetime]:
 
 
 def updated_at_column() -> Mapped[datetime]:
-    """Last-modified timestamp, maintained by the ORM on flush."""
+    """Last-modified timestamp, set explicitly by repositories.
+
+    Deliberately **not** ``onupdate=func.now()``. That emits a server-computed value in
+    the UPDATE, which expires the attribute; reading it afterwards triggers a lazy refresh,
+    and a lazy refresh in async SQLAlchemy raises ``MissingGreenlet`` rather than doing the
+    obvious thing. Repositories set the value from an injected clock instead, which also
+    makes the timestamp deterministic in tests.
+
+    This is an ORM-level concern only — the emitted DDL is identical either way, so it
+    needs no migration.
+    """
     return mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
-        onupdate=func.now(),
     )
 
 

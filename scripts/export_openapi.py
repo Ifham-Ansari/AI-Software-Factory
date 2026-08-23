@@ -34,9 +34,9 @@ from factory_core.config import (
 # hostname into a committed artefact.
 _SCHEMA_SETTINGS = Settings(
     environment=Environment.TEST,
-    database=DatabaseSettings(url="postgresql://schema:schema@localhost:5432/schema"),  # type: ignore[arg-type]
+    database=DatabaseSettings(url="postgresql://schema:schema@localhost:5432/schema"),
     security=SecuritySettings(
-        jwt_secret_key="openapi-export-placeholder-key-32-chars-min",  # type: ignore[arg-type]  # noqa: S106
+        jwt_secret_key="openapi-export-placeholder-key-32-chars-min",  # noqa: S106
     ),
     observability=ObservabilitySettings(),
     api=ApiSettings(docs_enabled=True),

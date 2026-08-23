@@ -10,7 +10,9 @@ it, and hands you live URLs — escalating every high-risk decision to a human.
 > CRUD, an audit trail, structured logging with secret redaction, generated TypeScript
 > contracts, and a Next.js control centre. **No AI agents yet** — those start in Phase 3.
 >
-> 313 backend tests · 32 frontend tests · 10 end-to-end specs.
+> 355 backend tests (93% coverage) · 32 frontend tests · 10 end-to-end specs — all green
+> against real PostgreSQL and the full stack.
+>
 > See [plan.md](plan.md) for the roadmap and [features.md](features.md) for exact status.
 
 ---
@@ -108,6 +110,10 @@ Later phases add more: Upstash Redis (Phase 2), OpenAI and LangSmith (Phase 3), 
 the code sandbox (Phase 5), GitHub/Vercel/Render tokens (Phases 5 and 7). None is needed
 to run what exists today.
 
+If you already have those credentials, put them in `.env` now — configuration for Redis,
+OpenAI and LangSmith exists and validates them, and registers them with the log redactor at
+startup. Nothing consumes them yet; `/ready` simply reports which are configured.
+
 ### Install
 
 ```bash
@@ -156,7 +162,14 @@ uv run alembic upgrade head
 
 ### Run
 
-Three processes, one terminal each:
+One command starts everything:
+
+```bash
+uv run dev
+```
+
+Output is prefixed per process, and Ctrl+C stops all three. Or run them separately, which
+gives clearer output when debugging one of them:
 
 ```bash
 uv run dev-api               # FastAPI      → http://127.0.0.1:8000  (docs at /docs)
@@ -188,23 +201,57 @@ with a message saying what they cover. They prove what in-memory fakes structura
 that the generated SQL really scopes by owner, that constraints and cascades behave as
 declared, and that migrations reverse.
 
+⚠️ **The target database is wiped on every run.** Point it at a throwaway, never at the
+database in `DATABASE_URL`.
+
+Either use a local container:
+
 ```bash
 docker run -d --name factory-test-db -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17-alpine
-export TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
-uv run pytest -m integration
+# then in .env:
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
 ```
 
-CI provisions this automatically; see [.github/workflows/ci.yml](.github/workflows/ci.yml).
+…or a separate database on the same Neon project — same connection string with the
+database name changed:
+
+```
+DATABASE_URL=postgresql://user:pw@ep-xxx.neon.tech/neondb?sslmode=require
+TEST_DATABASE_URL=postgresql://user:pw@ep-xxx.neon.tech/factory_test?sslmode=require
+```
+
+Create it once with `CREATE DATABASE factory_test;`. `.env` is read by the test suite, so
+no export is needed.
+
+CI provisions a `postgres:17` service automatically; see
+[.github/workflows/ci.yml](.github/workflows/ci.yml).
+
+### End-to-end
+
+Playwright drives a real browser against the running stack, so start it first:
+
+```bash
+uv run dev                            # or the three commands separately
+pnpm --filter web exec playwright install chromium   # once
+pnpm --filter web test:e2e
+```
 
 ### Quality gates
 
+Everything CI enforces, runnable locally:
+
 ```bash
-uv run ruff check . && uv run mypy --strict && uv run lint-imports
-pnpm --filter web lint && pnpm --filter web exec tsc --noEmit
+uv run ruff check . && uv run ruff format --check .
+uv run mypy packages/core/src apps/api/src apps/worker/src scripts
+uv run lint-imports                         # layering contracts
+uv run python scripts/check_file_size.py    # the 250-line rule
+pnpm --filter web lint
+pnpm -r typecheck
 ```
 
-`lint-imports` enforces the layering rules — `core` may not import LangGraph or FastAPI, `agents`
-may not import FastAPI. A violation fails the build.
+`lint-imports` enforces layering: `core` may not import a web framework, `domain` may not
+import SQLAlchemy, and the API and worker must stay independent processes. A violation
+fails the build rather than becoming a review comment.
 
 ### LangSmith
 

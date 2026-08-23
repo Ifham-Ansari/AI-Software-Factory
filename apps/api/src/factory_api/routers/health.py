@@ -48,4 +48,4 @@ async def ready(state: StateDep, response: Response) -> ReadinessResponse:
     report = await state.health.check()
     if not report.is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return ReadinessResponse.from_report(report)
+    return ReadinessResponse.from_report(report, state.settings.configured_integrations())

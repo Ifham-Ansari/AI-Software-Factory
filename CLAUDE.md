@@ -179,21 +179,24 @@ diffable, reviewable, offline-capable, and recorded per call.
 |---|---|
 | Phase | **1 complete** — Platform Foundation & Contracts |
 | Next | **Phase 2 — Secure Configuration, Secrets & Realtime Backbone** ([plan.md](plan.md) §5) |
-| Features | **14 VERIFIED, 4 TESTING** of 127 ([features.md](features.md)) |
-| Tests | 313 backend (37 integration skip without a database) · 32 frontend · 10 e2e specs |
+| Features | **18 VERIFIED** of 127 ([features.md](features.md)) |
+| Tests | 355 backend (0 skipped, 93% coverage) · 32 frontend · 10 e2e — all green |
 
 **What exists.** A working platform: registration, sign-in, rotating refresh tokens with
 theft detection, project CRUD scoped per owner, an audit trail, structured logging with
 secret redaction, health and readiness endpoints, generated TypeScript contracts, and a
 Next.js control centre. No AI yet — that starts in Phase 3.
 
-**What the four `TESTING` features need.** F-103, F-104, F-105 and F-109 are implemented
-and have tests, but their proof is the integration suite, which requires a real PostgreSQL
-via `TEST_DATABASE_URL`. It skips without one and runs in CI. Do not mark them `VERIFIED`
-until a CI run is green.
+**Verified against real infrastructure.** The integration suite runs against a real
+PostgreSQL and the e2e suite against the full stack. Nothing in Phase 1 is unproven.
 
 **Before starting Phase 2**, run the full suite and confirm it is green. If the integration
-tests still skip, say so rather than assuming they pass.
+tests skip, `TEST_DATABASE_URL` is unset — say so rather than assuming they pass.
+
+**Credentials for later phases are already configured.** Redis, OpenAI and LangSmith
+settings exist in `factory_core.config.integrations` and are registered with the
+redactor at startup. Only the *configuration* is built; the clients that consume it are
+Phase 2 and Phase 3 work. Do not wire them up early.
 
 ### Event loops and psycopg
 

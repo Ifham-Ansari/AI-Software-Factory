@@ -23,6 +23,11 @@ const nextConfig: NextConfig = {
   // Do not advertise the framework version to every visitor.
   poweredByHeader: false,
 
+  // Next 16 blocks cross-origin requests to dev-only resources. Playwright drives the
+  // app on 127.0.0.1 while the dev server assumes localhost, so HMR requests are
+  // rejected and fill the console with 403s. Development only; no effect on a build.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
+
   async headers() {
     return [
       {
