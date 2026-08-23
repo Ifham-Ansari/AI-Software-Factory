@@ -1,19 +1,183 @@
 [project]
-name = "agentic-ai-chatbot-using-langgraph"
+name = "ai-software-factory"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "Ifham Ansari", email = "ifhamansari933@gmail.com" }
-]
-requires-python = ">=3.11"
+description = "Hierarchical, supervised, multi-agent AI software factory"
+requires-python = ">=3.13,<3.14"
 dependencies = [
-    "langgraph>=1.2.11",
+    "factory-core",
+    "factory-api",
+    "factory-worker",
 ]
 
 [project.scripts]
-agentic-ai-chatbot-using-langgraph = "agentic_ai_chatbot_using_langgraph:main"
+# Starts API, worker and web together. The three can also be run separately;
+# see scripts/dev.py.
+dev = "scripts.dev:main"
+
+[tool.uv.workspace]
+members = ["packages/core", "apps/api", "apps/worker"]
+
+[tool.uv.sources]
+factory-core = { workspace = true }
+factory-api = { workspace = true }
+factory-worker = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<1",
+    "pytest-cov>=6,<8",
+    "httpx>=0.28,<1",
+    "mypy>=1.13,<2",
+    "ruff>=0.8,<1",
+    "import-linter>=2.1,<3",
+    "types-passlib>=1.7,<2",
+]
 
 [build-system]
-requires = ["uv_build>=0.12.5,<0.13.0"]
-build-backend = "uv_build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scripts"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["packages/core/src/factory_core/migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtins shadowing
+    "C4",        # comprehensions
+    "DTZ",       # naive datetimes
+    "T20",       # no print
+    "SIM",       # simplify
+    "RUF",       # ruff-specific
+    "ASYNC",     # async correctness
+    "S",         # bandit security
+]
+ignore = [
+    "S101",  # assert is fine in tests; enforced elsewhere by review
+    "B008",  # FastAPI Depends() in defaults is idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S105", "S106", "S311"]
+"**/migrations/**" = ["E501"]
+# S105 flags any identifier containing "TOKEN" or "SECRET" as a hardcoded password.
+# These modules define enum members and a token *type* label ("bearer"); none is a
+# credential. Scoped to the specific files rather than disabled globally.
+"**/errors/codes.py" = ["S105"]
+"**/domain/audit.py" = ["S105"]
+"**/application/auth/schemas.py" = ["S105"]
+"**/factory_api/schemas/auth.py" = ["S105"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["factory_core", "factory_api", "factory_worker"]
+
+# ---------------------------------------------------------------------------
+# Mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+warn_unused_ignores = true
+disallow_any_explicit = false
+show_error_codes = true
+pretty = true
+plugins = ["pydantic.mypy"]
+mypy_path = "packages/core/src:apps/api/src:apps/worker/src"
+explicit_package_bases = true
+exclude = ["migrations/versions/"]
+
+[[tool.mypy.overrides]]
+module = ["factory_core.migrations.*"]
+ignore_errors = true
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["packages/core/tests", "apps/api/tests", "apps/worker/tests"]
+# importlib mode lets several test roots contain identically-named modules without
+# needing __init__.py files, which would otherwise collide on a single top-level
+# `tests` package. Shared helpers are exposed as conftest fixtures instead of imports.
+addopts = "--import-mode=importlib"
+markers = [
+    "unit: fast, no I/O, no network",
+    "integration: requires a real Postgres via TEST_DATABASE_URL",
+    "failure: adversarial and fault-injection cases",
+    "security: isolation, authz, traversal and leakage cases",
+]
+filterwarnings = ["error::DeprecationWarning:factory_.*"]
+
+[tool.coverage.run]
+source = ["packages/core/src/factory_core"]
+omit = ["*/migrations/*", "*/tests/*"]
+branch = true
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+    "\\.\\.\\.",
+]
+
+# ---------------------------------------------------------------------------
+# Import Linter — layering is enforced, not merely documented
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = ["factory_core", "factory_api", "factory_worker"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "core is framework-free"
+type = "forbidden"
+source_modules = ["factory_core"]
+forbidden_modules = ["fastapi", "starlette", "langgraph", "langchain", "uvicorn"]
+
+[[tool.importlinter.contracts]]
+name = "agents layer must not import the HTTP layer"
+type = "forbidden"
+source_modules = ["factory_core"]
+forbidden_modules = ["factory_api", "factory_worker"]
+
+[[tool.importlinter.contracts]]
+name = "api and worker are independent processes"
+type = "independence"
+modules = ["factory_api", "factory_worker"]
+
+[[tool.importlinter.contracts]]
+name = "core layers point inward"
+type = "layers"
+layers = [
+    "factory_core.application",
+    "factory_core.persistence",
+    "factory_core.domain",
+]
+exhaustive = false
+
+[[tool.importlinter.contracts]]
+name = "domain depends on nothing but errors"
+type = "forbidden"
+source_modules = ["factory_core.domain"]
+forbidden_modules = [
+    "factory_core.application",
+    "factory_core.persistence",
+    "factory_core.config",
+    "sqlalchemy",
+]

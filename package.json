@@ -1,0 +1,21 @@
+{
+  "name": "ai-software-factory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hierarchical, supervised, multi-agent AI software factory",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "lint": "pnpm --filter web lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter web test",
+    "test:e2e": "pnpm --filter web test:e2e"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
