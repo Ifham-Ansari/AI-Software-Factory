@@ -57,14 +57,40 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Create an account
-         * @description Register a new account and return a session.
+         * Create an account and send a verification code
+         * @description Create an unverified account and email a one-time code.
          *
-         *     Registration signs the user straight in. Requiring a separate sign-in immediately
-         *     after would add a round trip and a second chance to mistype the password, for no
-         *     security benefit — the credentials were just verified.
+         *     202 rather than 201: the account exists but is not yet usable, and the meaningful work
+         *     — proving the address — has not finished.
+         *
+         *     The daily cap is not applied to this first code. The user has not asked for anything
+         *     yet, so refusing their very first code would be nonsensical.
          */
         post: operations["register_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/resend-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a fresh verification code
+         * @description Issue a new code, superseding any previous one.
+         *
+         *     Answers identically for an unknown address and an already-verified one. Anything else
+         *     would turn this unauthenticated endpoint into an account-existence oracle. Rate limits
+         *     still apply to real accounts, so it cannot be used to flood an inbox.
+         */
+        post: operations["resend_verification_auth_resend_verification_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -84,8 +110,12 @@ export interface paths {
          * Authenticate
          * @description Exchange credentials for a session.
          *
-         *     An unknown email and a wrong password produce the same error, after the same amount
-         *     of work, so this endpoint cannot be used to discover which addresses are registered.
+         *     An unknown email and a wrong password produce the same error, after the same amount of
+         *     work, so this endpoint cannot be used to discover which addresses are registered.
+         *
+         *     Correct credentials on an unverified account return ``email_not_verified`` (403). That
+         *     only ever reaches someone who already knows the password, so it is not an enumeration
+         *     vector — and the caller needs to know to go and enter their code.
          */
         post: operations["sign_in_auth_sign_in_post"];
         delete?: never;
@@ -111,6 +141,47 @@ export interface paths {
          *     reporting the difference would tell an unauthenticated caller whether a token is real.
          */
         post: operations["sign_out_auth_sign_out_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/verify-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem a verification code
+         * @description Redeem a code and start a session.
+         *
+         *     An unknown address produces the same error as a wrong code, so this endpoint cannot be
+         *     used to discover which addresses are registered. Redeeming a code proves ownership of
+         *     the address, so a session is issued without re-checking the password.
+         */
+        post: operations["verify_email_auth_verify_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/debug/verification-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the last verification code sent to an address (dev/test only) */
+        get: operations["last_verification_code_debug_verification_code_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -310,7 +381,7 @@ export interface components {
          * @description Stable error identifiers returned in the API error envelope.
          * @enum {string}
          */
-        ErrorCode: "validation_failed" | "malformed_request" | "invalid_credentials" | "token_expired" | "token_invalid" | "token_reused" | "not_authenticated" | "forbidden" | "not_found" | "already_exists" | "conflict" | "rate_limited" | "database_unavailable" | "service_unavailable" | "configuration_invalid" | "internal_error";
+        ErrorCode: "validation_failed" | "malformed_request" | "invalid_credentials" | "token_expired" | "token_invalid" | "token_reused" | "not_authenticated" | "email_not_verified" | "invalid_code" | "forbidden" | "not_found" | "already_exists" | "conflict" | "rate_limited" | "database_unavailable" | "service_unavailable" | "configuration_invalid" | "internal_error";
         /**
          * ErrorDetail
          * @description A single field-level validation problem.
@@ -496,9 +567,20 @@ export interface components {
             email: string;
             /**
              * Password
-             * @description At least 12 characters. Length is the requirement rather than character-class rules, which push users toward predictable substitutions.
+             * @description At least 8 characters. Length is the requirement rather than character-class rules, which push users toward predictable substitutions.
              */
             password: string;
+        };
+        /**
+         * ResendVerificationRequest
+         * @description Request a fresh verification code.
+         */
+        ResendVerificationRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
         };
         /**
          * SessionResponse
@@ -581,6 +663,8 @@ export interface components {
             display_name: string;
             /** Email */
             email: string;
+            /** Email Verified */
+            email_verified: boolean;
             /** Id */
             id: string;
             /** Status */
@@ -598,6 +682,58 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * VerificationChallengeResponse
+         * @description Issued after registration or a resend.
+         *
+         *     Carries no code and no identifier for one — only what the UI needs to render a timer
+         *     and a resend button.
+         */
+        VerificationChallengeResponse: {
+            /** Email */
+            email: string;
+            /**
+             * Expires In
+             * @description Seconds until the code expires.
+             */
+            expires_in: number;
+            /**
+             * Message
+             * @default Check your email for a verification code.
+             */
+            message: string;
+            /**
+             * Resend Available In
+             * @description Seconds before another code may be requested.
+             */
+            resend_available_in: number;
+        };
+        /**
+         * VerificationCodeDebugResponse
+         * @description The most recent one-time code sent to an address, for e2e tests to read.
+         *
+         *     Never present outside development/test: production and staging never register this
+         *     router, and the console transport it depends on refuses to run in production anyway.
+         */
+        VerificationCodeDebugResponse: {
+            /** Code */
+            code: string;
+            /** Email */
+            email: string;
+        };
+        /**
+         * VerifyEmailRequest
+         * @description Redeem a one-time verification code.
+         */
+        VerifyEmailRequest: {
+            /** Code */
+            code: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
         };
     };
     responses: never;
@@ -677,6 +813,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Conflict */
             409: {
                 headers: {
@@ -688,6 +833,15 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -711,12 +865,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionResponse"];
+                    "application/json": components["schemas"]["VerificationChallengeResponse"];
                 };
             };
             /** @description Bad Request */
@@ -737,6 +891,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Conflict */
             409: {
                 headers: {
@@ -748,6 +911,93 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    resend_verification_auth_resend_verification_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResendVerificationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerificationChallengeResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -797,6 +1047,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Conflict */
             409: {
                 headers: {
@@ -808,6 +1067,15 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -857,6 +1125,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Conflict */
             409: {
                 headers: {
@@ -873,6 +1150,124 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    verify_email_auth_verify_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    last_verification_code_debug_verification_code_get: {
+        parameters: {
+            query: {
+                email: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerificationCodeDebugResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

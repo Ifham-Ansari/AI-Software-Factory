@@ -1,35 +1,15 @@
 import { expect, test } from "@playwright/test";
+import { PASSWORD, fetchVerificationCode, registerAndSignIn, uniqueEmail } from "./helpers";
 
 /**
  * The Phase 1 acceptance journey, end to end in a real browser:
- * register → create a project → see it listed → sign out → session rejected.
+ * register → verify email → create a project → see it listed → sign out → session rejected.
  */
-
-/**
- * A fresh address per test, so parallel runs never contend for one account.
- *
- * ``example.com`` rather than ``.test``: the API validates deliverability, and reserved
- * TLDs like ``.test`` are rejected because no address under them can receive mail.
- * ``example.com`` is the reserved documentation domain and passes.
- */
-function uniqueEmail(): string {
-  return `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
-}
-
-const PASSWORD = "an-e2e-passphrase-long-enough";
 
 test.describe("authentication", () => {
   test("register, create a project, sign out, and lose access", async ({ page }) => {
-    const email = uniqueEmail();
+    await registerAndSignIn(page, "E2E User");
 
-    await page.goto("/register");
-    await page.getByLabel("Name").fill("E2E User");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill(PASSWORD);
-    await page.getByRole("button", { name: "Create account" }).click();
-
-    // Registration signs the user straight in.
-    await expect(page).toHaveURL(/\/projects$/);
     await expect(page.getByTestId("current-user")).toHaveText("E2E User");
 
     // A brand-new account has no projects, and the empty state says what to do.
@@ -51,20 +31,13 @@ test.describe("authentication", () => {
   });
 
   test("sign in with an existing account", async ({ page }) => {
-    const email = uniqueEmail();
-
-    await page.goto("/register");
-    await page.getByLabel("Name").fill("Returning User");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill(PASSWORD);
-    await page.getByRole("button", { name: "Create account" }).click();
-    await expect(page).toHaveURL(/\/projects$/);
+    const email = await registerAndSignIn(page, "Returning User");
 
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login$/);
 
     await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
 
     await expect(page).toHaveURL(/\/projects$/);
@@ -72,18 +45,11 @@ test.describe("authentication", () => {
   });
 
   test("rejects wrong credentials without revealing which half was wrong", async ({ page }) => {
-    const email = uniqueEmail();
-
-    await page.goto("/register");
-    await page.getByLabel("Name").fill("Someone");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill(PASSWORD);
-    await page.getByRole("button", { name: "Create account" }).click();
-    await expect(page).toHaveURL(/\/projects$/);
+    const email = await registerAndSignIn(page, "Someone");
     await page.getByRole("button", { name: "Sign out" }).click();
 
     await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill("the-wrong-passphrase");
+    await page.getByLabel("Password", { exact: true }).fill("the-wrong-passphrase");
     await page.getByRole("button", { name: "Sign in" }).click();
 
     // Not getByRole("alert"): Next.js's route announcer also carries role="alert",
@@ -96,7 +62,7 @@ test.describe("authentication", () => {
     await page.goto("/register");
     await page.getByLabel("Name").fill("Ada");
     await page.getByLabel("Email").fill("not-an-email");
-    await page.getByLabel("Password").fill("short");
+    await page.getByLabel("Password", { exact: true }).fill("short");
     await page.getByRole("button", { name: "Create account" }).click();
 
     await expect(page.getByText("Enter a valid email address")).toBeVisible();
@@ -107,5 +73,63 @@ test.describe("authentication", () => {
     await page.goto("/projects");
 
     await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("verifies a new account with a 6-digit code, then can sign in without it", async ({
+    page,
+  }) => {
+    const email = uniqueEmail();
+
+    await page.goto("/register");
+    await page.getByLabel("Name").fill("Code Entry");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+    await page.getByRole("button", { name: "Create account" }).click();
+
+    await expect(page).toHaveURL(/\/verify-email/);
+    await expect(page.getByText(email)).toBeVisible();
+
+    // A wrong code is rejected without consuming the real one.
+    for (const [index, digit] of "000000".split("").entries()) {
+      await page.getByLabel(`Digit ${index + 1} of 6`).fill(digit);
+    }
+    await page.getByRole("button", { name: "Verify email" }).click();
+    await expect(page.getByText(/invalid|incorrect|attempts/i)).toBeVisible();
+
+    const code = await fetchVerificationCode(page, email);
+    for (const [index, digit] of code.split("").entries()) {
+      await page.getByLabel(`Digit ${index + 1} of 6`).fill(digit);
+    }
+    await page.getByRole("button", { name: "Verify email" }).click();
+
+    await expect(page).toHaveURL(/\/projects$/);
+
+    // Signing back in never re-prompts for a code once the account is verified.
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page).toHaveURL(/\/projects$/);
+  });
+
+  test("can resend a verification code", async ({ page }) => {
+    const email = uniqueEmail();
+
+    await page.goto("/register");
+    await page.getByLabel("Name").fill("Resend User");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+    await page.getByRole("button", { name: "Create account" }).click();
+    await expect(page).toHaveURL(/\/verify-email/);
+
+    await page.getByRole("button", { name: "Resend code" }).click();
+    await expect(page.getByText("A new code is on its way.")).toBeVisible();
+
+    const code = await fetchVerificationCode(page, email);
+    for (const [index, digit] of code.split("").entries()) {
+      await page.getByLabel(`Digit ${index + 1} of 6`).fill(digit);
+    }
+    await page.getByRole("button", { name: "Verify email" }).click();
+    await expect(page).toHaveURL(/\/projects$/);
   });
 });

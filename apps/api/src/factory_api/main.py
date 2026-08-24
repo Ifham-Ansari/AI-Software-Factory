@@ -15,6 +15,7 @@ from factory_api.errors import register_exception_handlers
 from factory_api.lifespan import build_lifespan
 from factory_api.middleware import REQUEST_ID_HEADER, CorrelationMiddleware
 from factory_api.routers import auth, health, projects
+from factory_api.routers.debug import build_debug_router
 from factory_core.config import Settings, get_settings
 
 DESCRIPTION = """
@@ -61,5 +62,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(projects.router)
+
+    # Never registered in a deployed environment: this is how e2e tests read a
+    # verification code without email delivery, and it must not exist anywhere reachable
+    # by a real user.
+    if not resolved.environment.is_deployed:
+        app.include_router(build_debug_router())
 
     return app

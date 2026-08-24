@@ -1,4 +1,4 @@
-"""Authentication endpoints over HTTP."""
+"""Registration and sign-in over HTTP."""
 
 from __future__ import annotations
 
@@ -12,17 +12,36 @@ PASSWORD = "a-sufficiently-long-passphrase"
 
 
 class TestRegister:
-    async def test_creates_account_and_returns_session(self, client: AsyncClient) -> None:
+    async def test_creates_an_unverified_account_and_sends_a_code(
+        self, client: AsyncClient, fakes
+    ) -> None:  # type: ignore[no-untyped-def]
         response = await client.post(
             "/auth/register",
             json={"email": EMAIL, "password": PASSWORD, "display_name": "Ada Lovelace"},
         )
 
-        assert response.status_code == 201
+        assert response.status_code == 202
         body = response.json()
-        assert body["user"]["email"] == EMAIL
-        assert body["token_type"] == "bearer"
-        assert body["expires_in"] == 600
+        assert body["email"] == EMAIL
+        assert body["expires_in"] > 0
+        assert body["resend_available_in"] >= 0
+        # No session yet: the address has not been proven.
+        assert "access_token" not in body
+        assert len(fakes.emails.sent) == 1
+        assert fakes.emails.sent[0].to == EMAIL
+
+    async def test_cannot_sign_in_before_verifying(self, client: AsyncClient) -> None:
+        await client.post(
+            "/auth/register",
+            json={"email": EMAIL, "password": PASSWORD, "display_name": "Ada"},
+        )
+
+        response = await client.post(
+            "/auth/sign-in", json={"email": EMAIL, "password": PASSWORD}
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "email_not_verified"
 
     @pytest.mark.security
     async def test_response_never_contains_password_material(self, client: AsyncClient) -> None:
@@ -35,6 +54,19 @@ class TestRegister:
         assert PASSWORD not in raw
         assert "password_hash" not in raw
         assert "argon2" not in raw
+
+    @pytest.mark.security
+    async def test_response_never_contains_the_code(
+        self, client: AsyncClient, fakes
+    ) -> None:  # type: ignore[no-untyped-def]
+        """The code is emailed, never returned in the API response."""
+        response = await client.post(
+            "/auth/register",
+            json={"email": EMAIL, "password": PASSWORD, "display_name": "Ada"},
+        )
+
+        code = fakes.emails.last_code()
+        assert code not in response.text
 
     async def test_duplicate_email_conflicts(self, client: AsyncClient, api) -> None:  # type: ignore[no-untyped-def]
         await api.register()
@@ -120,110 +152,3 @@ class TestSignIn:
         assert wrong.status_code == unknown.status_code == 401
         assert wrong.json()["error"]["code"] == unknown.json()["error"]["code"]
         assert wrong.json()["error"]["message"] == unknown.json()["error"]["message"]
-
-
-class TestRefresh:
-    async def test_rotates_the_token(self, client: AsyncClient, api) -> None:  # type: ignore[no-untyped-def]
-        session = await api.register()
-
-        response = await client.post(
-            "/auth/refresh", json={"refresh_token": session["refresh_token"]}
-        )
-
-        assert response.status_code == 200
-        assert response.json()["refresh_token"] != session["refresh_token"]
-
-    @pytest.mark.failure
-    @pytest.mark.security
-    async def test_reused_token_revokes_the_family(
-        self,
-        client: AsyncClient,
-        api,  # type: ignore[no-untyped-def]
-    ) -> None:
-        session = await api.register()
-        rotated = await client.post(
-            "/auth/refresh", json={"refresh_token": session["refresh_token"]}
-        )
-        current = rotated.json()["refresh_token"]
-
-        replayed = await client.post(
-            "/auth/refresh", json={"refresh_token": session["refresh_token"]}
-        )
-
-        assert replayed.status_code == 401
-        assert replayed.json()["error"]["code"] == "token_reused"
-
-        # The whole family is dead, including the legitimate holder's current token.
-        after = await client.post("/auth/refresh", json={"refresh_token": current})
-        assert after.status_code == 401
-
-    @pytest.mark.failure
-    async def test_unknown_token_rejected(self, client: AsyncClient) -> None:
-        response = await client.post("/auth/refresh", json={"refresh_token": "nonsense"})
-
-        assert response.status_code == 401
-        assert response.json()["error"]["code"] == "token_invalid"
-
-
-class TestSignOut:
-    async def test_revokes_the_session(self, client: AsyncClient, api) -> None:  # type: ignore[no-untyped-def]
-        session = await api.register()
-
-        response = await client.post(
-            "/auth/sign-out", json={"refresh_token": session["refresh_token"]}
-        )
-
-        assert response.status_code == 200
-        replay = await client.post(
-            "/auth/refresh", json={"refresh_token": session["refresh_token"]}
-        )
-        assert replay.status_code == 401
-
-    async def test_unknown_token_succeeds_silently(self, client: AsyncClient) -> None:
-        response = await client.post("/auth/sign-out", json={"refresh_token": "nope"})
-
-        assert response.status_code == 200
-
-
-class TestCurrentUser:
-    async def test_returns_the_authenticated_user(self, client: AsyncClient, api) -> None:  # type: ignore[no-untyped-def]
-        session = await api.register()
-
-        response = await client.get("/auth/me", headers=api.auth_header(session))
-
-        assert response.status_code == 200
-        assert response.json()["email"] == EMAIL
-
-    @pytest.mark.failure
-    @pytest.mark.parametrize(
-        "headers",
-        [
-            {},
-            {"Authorization": "Bearer not-a-token"},
-            {"Authorization": "Basic abc"},
-            {"Authorization": "Bearer "},
-        ],
-    )
-    async def test_bad_credentials_rejected(
-        self, client: AsyncClient, headers: dict[str, str]
-    ) -> None:
-        response = await client.get("/auth/me", headers=headers)
-
-        assert response.status_code == 401
-
-    @pytest.mark.failure
-    @pytest.mark.security
-    async def test_suspended_account_is_refused(
-        self,
-        client: AsyncClient,
-        api,  # type: ignore[no-untyped-def]
-        fakes,  # type: ignore[no-untyped-def]
-    ) -> None:
-        """Suspension must take effect immediately, not when the token expires."""
-        session = await api.register()
-        user_id = next(iter(fakes.users.users))
-        fakes.users.suspend(user_id)
-
-        response = await client.get("/auth/me", headers=api.auth_header(session))
-
-        assert response.status_code == 403

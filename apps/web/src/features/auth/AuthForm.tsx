@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import Link from "next/link";
-import { Alert, Button, Field } from "@/components/ui";
+import { Alert, Button, Field, PasswordField } from "@/components/ui";
 import { initialFormState, type FormState } from "@/lib/actions/state";
 import { MIN_PASSWORD_LENGTH } from "@/lib/validation";
 
@@ -21,6 +21,8 @@ interface AuthFormProps {
  *
  * Built on `useActionState`, so it submits as a plain HTML form when JavaScript has not
  * loaded yet and progressively upgrades to inline errors and a pending state once it has.
+ * Registration does not sign the user in directly — it sends a verification code, and the
+ * action redirects to the code-entry step.
  */
 export function AuthForm({ mode, action }: AuthFormProps) {
   const [state, formAction, pending] = useActionState(action, initialFormState);
@@ -29,11 +31,14 @@ export function AuthForm({ mode, action }: AuthFormProps) {
 
   return (
     <div className="auth-card">
-      <h1>{isRegister ? "Create your account" : "Sign in"}</h1>
+      <div className="auth-mark" aria-hidden="true">
+        <FactoryMark />
+      </div>
+      <h1>{isRegister ? "Create your account" : "Welcome back"}</h1>
       <p className="auth-subtitle">
         {isRegister
           ? "Describe what you want built. The factory does the rest."
-          : "Welcome back."}
+          : "Sign in to continue to your projects."}
       </p>
 
       {state.error && <Alert variant="error">{state.error}</Alert>}
@@ -59,14 +64,14 @@ export function AuthForm({ mode, action }: AuthFormProps) {
           error={errors.email}
         />
 
-        <Field
+        <PasswordField
           label="Password"
           name="password"
-          type="password"
           // A new password gets `new-password` so managers offer to generate one;
           // an existing one gets `current-password` so they autofill it.
           autoComplete={isRegister ? "new-password" : "current-password"}
           required
+          minLength={isRegister ? MIN_PASSWORD_LENGTH : undefined}
           error={errors.password}
           hint={isRegister ? `At least ${MIN_PASSWORD_LENGTH} characters.` : undefined}
         />
@@ -88,5 +93,21 @@ export function AuthForm({ mode, action }: AuthFormProps) {
         )}
       </p>
     </div>
+  );
+}
+
+/** A minimal geometric mark, kept as inline SVG so no image asset is needed. */
+function FactoryMark() {
+  return (
+    <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+      <rect width="36" height="36" rx="10" className="auth-mark-bg" />
+      <path
+        d="M11 24V15l4 3 4-5 4 5 4-3v9H11Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

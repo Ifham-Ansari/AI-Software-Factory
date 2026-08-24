@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from factory_core.domain.ids import UserId, VerificationId
-from factory_core.infrastructure.email.messages import EmailMessage
+from factory_core.infrastructure.email.messages import EmailMessage, extract_code
 from factory_core.security.verification import VerificationCode, VerificationStatus
 
 
@@ -94,13 +94,11 @@ class RecordingEmailSender:
 
     def last_code(self, length: int = 6) -> str:
         """Extract the code from the most recent message."""
-        import re
-
         if not self.sent:
             msg = "No email has been sent"
             raise AssertionError(msg)
-        match = re.search(rf"\b(\d{{{length}}})\b", self.sent[-1].text_body)
-        if match is None:
+        code = extract_code(self.sent[-1].text_body, length=length)
+        if code is None:
             msg = "No code found in the most recent email"
             raise AssertionError(msg)
-        return match.group(1)
+        return code

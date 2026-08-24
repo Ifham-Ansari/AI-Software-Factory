@@ -35,6 +35,9 @@ export type RefreshRequest = Schemas["RefreshRequest"];
 export type SignOutRequest = Schemas["SignOutRequest"];
 export type SessionResponse = Schemas["SessionResponse"];
 export type UserResponse = Schemas["UserResponse"];
+export type VerifyEmailRequest = Schemas["VerifyEmailRequest"];
+export type ResendVerificationRequest = Schemas["ResendVerificationRequest"];
+export type VerificationChallengeResponse = Schemas["VerificationChallengeResponse"];
 
 // --- Projects --------------------------------------------------------------
 

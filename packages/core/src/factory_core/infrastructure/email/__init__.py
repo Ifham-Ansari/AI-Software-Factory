@@ -1,6 +1,10 @@
 """Email delivery."""
 
-from factory_core.infrastructure.email.messages import EmailMessage, verification_email
+from factory_core.infrastructure.email.messages import (
+    EmailMessage,
+    extract_code,
+    verification_email,
+)
 from factory_core.infrastructure.email.senders import (
     ConsoleEmailSender,
     EmailSender,
@@ -14,5 +18,6 @@ __all__ = [
     "EmailSender",
     "SmtpEmailSender",
     "build_email_sender",
+    "extract_code",
     "verification_email",
 ]

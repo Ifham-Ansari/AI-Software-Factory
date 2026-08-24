@@ -167,11 +167,27 @@ class TestProductionHardening:
         _set_valid(monkeypatch)
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("API__DOCS_ENABLED", "false")
+        # The console email transport prints one-time codes to the log, so production
+        # also requires a real transport to be configured.
+        monkeypatch.setenv("EMAIL__TRANSPORT", "smtp")
+        monkeypatch.setenv("EMAIL__SMTP_HOST", "smtp.example.com")
 
         settings = load_settings()
 
         assert settings.environment.is_production
         assert not settings.api.docs_enabled
+        assert settings.email.transport == "smtp"
+
+    def test_console_email_transport_refused_in_production(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The console transport logs a one-time verification code."""
+        _set_valid(monkeypatch)
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("API__DOCS_ENABLED", "false")
+
+        with pytest.raises(ConfigurationError, match="EMAIL__TRANSPORT"):
+            load_settings()
 
 
 class TestSecretExposure:

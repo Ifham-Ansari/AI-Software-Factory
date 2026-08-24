@@ -12,6 +12,7 @@ from factory_api.schemas.auth import (
     VerifyEmailRequest,
 )
 from factory_api.schemas.common import MessageResponse, PageMeta, PaginatedResponse
+from factory_api.schemas.debug import VerificationCodeDebugResponse
 from factory_api.schemas.errors import ErrorBody, ErrorDetail, ErrorResponse
 from factory_api.schemas.health import (
     DependencyResponse,
@@ -45,5 +46,6 @@ __all__ = [
     "UpdateProjectRequest",
     "UserResponse",
     "VerificationChallengeResponse",
+    "VerificationCodeDebugResponse",
     "VerifyEmailRequest",
 ]

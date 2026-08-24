@@ -1,7 +1,8 @@
 """Authentication service behaviour.
 
-Covers registration, sign-in, rotation and — the part that matters most — refresh-token
-reuse detection.
+Covers registration (unverified), sign-in gating on verification, rotation, and — the
+part that matters most — refresh-token reuse detection. The verification flow itself has
+its own suite: ``test_email_verification.py``.
 """
 
 from __future__ import annotations
@@ -14,8 +15,10 @@ from pydantic import SecretStr
 from factory_core.application.auth import AuthService, RegisterCommand, SignInCommand
 from factory_core.application.ports import FrozenClock
 from factory_core.domain.audit import AuditAction
+from factory_core.domain.entities import User
 from factory_core.errors import (
     AlreadyExistsError,
+    EmailNotVerifiedError,
     InvalidCredentialsError,
     TokenReusedError,
 )
@@ -52,10 +55,28 @@ class Harness:
             request_id="test-request",
         )
 
-    async def register(self, email: str = EMAIL, password: str = PASSWORD):  # type: ignore[no-untyped-def]
+    async def register(
+        self, email: str = EMAIL, password: str = PASSWORD, display_name: str = "Ada Lovelace"
+    ) -> User:
+        """Create an account. Unverified, per the real registration contract."""
         return await self.service.register(
-            RegisterCommand(email=email, password=SecretStr(password), display_name="Ada Lovelace")
+            RegisterCommand(email=email, password=SecretStr(password), display_name=display_name)
         )
+
+    async def register_and_verify(
+        self, email: str = EMAIL, password: str = PASSWORD, display_name: str = "Ada Lovelace"
+    ) -> User:
+        """Create an account and mark it verified without going through a real code.
+
+        The verification flow itself — codes, attempts, expiry — is exercised in
+        ``test_email_verification.py``. Most tests here only need a usable account.
+        """
+        user = await self.register(email=email, password=password, display_name=display_name)
+        self.users.verify(user.id)
+        return self.users.users[user.id]
+
+    async def sign_in(self, email: str = EMAIL, password: str = PASSWORD):  # type: ignore[no-untyped-def]
+        return await self.service.sign_in(SignInCommand(email=email, password=SecretStr(password)))
 
 
 @pytest.fixture
@@ -64,18 +85,17 @@ def harness(password_hasher: PasswordHasher, token_issuer: AccessTokenIssuer) ->
 
 
 class TestRegistration:
-    async def test_creates_account_and_signs_in(self, harness: Harness) -> None:
-        session = await harness.register()
+    async def test_creates_an_unverified_account(self, harness: Harness) -> None:
+        user = await harness.register()
 
-        assert session.user.email == EMAIL
-        assert session.access_token
-        assert session.refresh_token
+        assert user.email == EMAIL
+        assert not user.is_email_verified
         assert AuditAction.USER_REGISTERED in harness.audit.actions()
 
     async def test_password_is_hashed_not_stored(self, harness: Harness) -> None:
-        session = await harness.register()
+        user = await harness.register()
 
-        stored = harness.users.hashes[session.user.id]
+        stored = harness.users.hashes[user.id]
         assert stored != PASSWORD
         assert stored.startswith("$argon2id$")
 
@@ -95,55 +115,59 @@ class TestRegistration:
 
 class TestSignIn:
     async def test_correct_credentials_start_a_session(self, harness: Harness) -> None:
-        await harness.register()
+        await harness.register_and_verify()
 
-        session = await harness.service.sign_in(
-            SignInCommand(email=EMAIL, password=SecretStr(PASSWORD))
-        )
+        session = await harness.sign_in()
 
         assert session.user.email == EMAIL
         assert AuditAction.USER_SIGNED_IN in harness.audit.actions()
 
-    @pytest.mark.failure
-    async def test_wrong_password_rejected(self, harness: Harness) -> None:
+    @pytest.mark.security
+    async def test_unverified_account_cannot_sign_in(self, harness: Harness) -> None:
+        """Correct password, unverified address: a distinct, actionable error.
+
+        Only reachable with the right password, so it is not an enumeration vector.
+        """
         await harness.register()
 
+        with pytest.raises(EmailNotVerifiedError):
+            await harness.sign_in()
+
+    @pytest.mark.failure
+    async def test_wrong_password_rejected(self, harness: Harness) -> None:
+        await harness.register_and_verify()
+
         with pytest.raises(InvalidCredentialsError):
-            await harness.service.sign_in(
-                SignInCommand(email=EMAIL, password=SecretStr("wrong-password-entirely"))
-            )
+            await harness.sign_in(password="wrong-password-entirely")
         assert AuditAction.USER_SIGN_IN_FAILED in harness.audit.actions()
 
     @pytest.mark.failure
     @pytest.mark.security
     async def test_unknown_email_is_indistinguishable(self, harness: Harness) -> None:
         """Both failures must raise the same error, or the endpoint enumerates accounts."""
-        await harness.register()
+        await harness.register_and_verify()
 
         with pytest.raises(InvalidCredentialsError) as unknown:
-            await harness.service.sign_in(
-                SignInCommand(email="nobody@example.com", password=SecretStr(PASSWORD))
-            )
+            await harness.sign_in(email="nobody@example.com")
         with pytest.raises(InvalidCredentialsError) as wrong:
-            await harness.service.sign_in(
-                SignInCommand(email=EMAIL, password=SecretStr("wrong-password-entirely"))
-            )
+            await harness.sign_in(password="wrong-password-entirely")
 
         assert unknown.value.message == wrong.value.message
         assert unknown.value.code == wrong.value.code
 
     @pytest.mark.security
     async def test_suspended_account_cannot_sign_in(self, harness: Harness) -> None:
-        session = await harness.register()
-        harness.users.suspend(session.user.id)
+        user = await harness.register_and_verify()
+        harness.users.suspend(user.id)
 
         with pytest.raises(InvalidCredentialsError):
-            await harness.service.sign_in(SignInCommand(email=EMAIL, password=SecretStr(PASSWORD)))
+            await harness.sign_in()
 
     async def test_each_sign_in_starts_a_new_family(self, harness: Harness) -> None:
         """Signing in on a second device must not be treated as token theft."""
-        await harness.register()
-        await harness.service.sign_in(SignInCommand(email=EMAIL, password=SecretStr(PASSWORD)))
+        await harness.register_and_verify()
+        await harness.sign_in()
+        await harness.sign_in()
 
         families = {t.family_id for t in harness.tokens.tokens.values()}
         assert len(families) == 2
@@ -151,7 +175,8 @@ class TestSignIn:
 
 class TestRefreshRotation:
     async def test_refresh_issues_a_new_token(self, harness: Harness) -> None:
-        session = await harness.register()
+        await harness.register_and_verify()
+        session = await harness.sign_in()
 
         refreshed = await harness.service.refresh(session.refresh_token)
 
@@ -160,7 +185,8 @@ class TestRefreshRotation:
         assert AuditAction.TOKEN_REFRESHED in harness.audit.actions()
 
     async def test_rotation_stays_in_the_same_family(self, harness: Harness) -> None:
-        session = await harness.register()
+        await harness.register_and_verify()
+        session = await harness.sign_in()
         await harness.service.refresh(session.refresh_token)
 
         families = {t.family_id for t in harness.tokens.tokens.values()}
@@ -168,7 +194,8 @@ class TestRefreshRotation:
 
     async def test_old_token_links_to_its_successor(self, harness: Harness) -> None:
         """The chain is what makes a compromised family traceable after the fact."""
-        session = await harness.register()
+        await harness.register_and_verify()
+        session = await harness.sign_in()
         await harness.service.refresh(session.refresh_token)
 
         rotated = [t for t in harness.tokens.tokens.values() if t.replaced_by_id is not None]
@@ -176,7 +203,8 @@ class TestRefreshRotation:
         assert rotated[0].replaced_by_id in harness.tokens.tokens
 
     async def test_refresh_chain_works_repeatedly(self, harness: Harness) -> None:
-        session = await harness.register()
+        await harness.register_and_verify()
+        session = await harness.sign_in()
 
         token = session.refresh_token
         for _ in range(5):
@@ -187,7 +215,8 @@ class TestRefreshRotation:
 
 class TestSignOut:
     async def test_revokes_the_session(self, harness: Harness) -> None:
-        session = await harness.register()
+        await harness.register_and_verify()
+        session = await harness.sign_in()
 
         await harness.service.sign_out(session.refresh_token)
 
@@ -200,7 +229,8 @@ class TestSignOut:
         await harness.service.sign_out("never-existed")
 
     async def test_signing_out_twice_is_safe(self, harness: Harness) -> None:
-        session = await harness.register()
+        await harness.register_and_verify()
+        session = await harness.sign_in()
 
         await harness.service.sign_out(session.refresh_token)
         await harness.service.sign_out(session.refresh_token)

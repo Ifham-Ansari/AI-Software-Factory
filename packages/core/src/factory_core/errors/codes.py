@@ -24,6 +24,9 @@ class ErrorCode(StrEnum):
     NOT_AUTHENTICATED = "not_authenticated"
     EMAIL_NOT_VERIFIED = "email_not_verified"
 
+    # --- Verification -----------------------------------------------------
+    INVALID_CODE = "invalid_code"
+
     # --- Authorization ---------------------------------------------------
     FORBIDDEN = "forbidden"
 

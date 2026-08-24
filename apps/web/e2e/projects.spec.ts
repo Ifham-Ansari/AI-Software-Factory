@@ -1,21 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { registerAndSignIn } from "./helpers";
 
 /** Project lifecycle and cross-user isolation, driven through the browser. */
-
-function uniqueEmail(): string {
-  return `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
-}
-
-const PASSWORD = "an-e2e-passphrase-long-enough";
-
-async function registerAndSignIn(page: Page, name = "E2E User"): Promise<void> {
-  await page.goto("/register");
-  await page.getByLabel("Name").fill(name);
-  await page.getByLabel("Email").fill(uniqueEmail());
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/projects$/);
-}
 
 async function createProject(page: Page, name: string): Promise<void> {
   await page.getByLabel("Name").fill(name);

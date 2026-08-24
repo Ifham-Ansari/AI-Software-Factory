@@ -188,6 +188,9 @@ jobs:
       # Argon2 at production cost would dominate the run; e2e is not a hashing benchmark.
       SECURITY__ARGON2_TIME_COST: "1"
       SECURITY__ARGON2_MEMORY_COST_KIB: "8192"
+      # The real 60s resend cooldown would make the resend spec race a production rate
+      # limit; that enforcement is already proven deterministically in the unit suite.
+      VERIFICATION__RESEND_COOLDOWN_SECONDS: "0"
     steps:
       - uses: actions/checkout@v4
 

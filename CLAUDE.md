@@ -180,12 +180,12 @@ diffable, reviewable, offline-capable, and recorded per call.
 | Phase | **1 complete** — Platform Foundation & Contracts |
 | Next | **Phase 2 — Secure Configuration, Secrets & Realtime Backbone** ([plan.md](plan.md) §5) |
 | Features | **18 VERIFIED** of 127 ([features.md](features.md)) |
-| Tests | 355 backend (0 skipped, 93% coverage) · 32 frontend · 10 e2e — all green |
+| Tests | 393 backend (0 skipped, 91% coverage) · 40 frontend · 12 e2e — all green |
 
-**What exists.** A working platform: registration, sign-in, rotating refresh tokens with
-theft detection, project CRUD scoped per owner, an audit trail, structured logging with
-secret redaction, health and readiness endpoints, generated TypeScript contracts, and a
-Next.js control centre. No AI yet — that starts in Phase 3.
+**What exists.** A working platform: registration with email OTP verification, sign-in,
+rotating refresh tokens with theft detection, project CRUD scoped per owner, an audit
+trail, structured logging with secret redaction, health and readiness endpoints, generated
+TypeScript contracts, and a Next.js control centre. No AI yet — that starts in Phase 3.
 
 **Verified against real infrastructure.** The integration suite runs against a real
 PostgreSQL and the e2e suite against the full stack. Nothing in Phase 1 is unproven.
@@ -257,3 +257,4 @@ need. Mark the feature `BLOCKED`. An accurate blocker beats an optimistic guess.
 |---|---|
 | 2026-08-23 | Created alongside the planning documents. No implementation yet. |
 | 2026-08-23 | Phase 1 implemented. Status updated; event-loop constraint recorded. |
+| 2026-08-24 | Email OTP verification added to registration; sign-in refuses unverified accounts. Password minimum lowered to 8 characters; auth UI polished (password show/hide, code entry, visual pass). Test counts updated. |

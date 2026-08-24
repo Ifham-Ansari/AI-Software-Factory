@@ -14,6 +14,8 @@ export interface FormState {
   fieldErrors?: Record<string, string>;
   /** Set on success for actions that stay on the page. */
   success?: boolean;
+  /** A positive message to show above the form, e.g. after a resend. */
+  message?: string;
 }
 
 /** The state a form starts in, before anything has been submitted. */
@@ -22,4 +24,9 @@ export const initialFormState: FormState = {};
 /** Build a failure state from a top-level message. */
 export function failure(error: string, fieldErrors?: Record<string, string>): FormState {
   return fieldErrors ? { error, fieldErrors } : { error };
+}
+
+/** Build a success state that stays on the page, with an informational message. */
+export function success(message: string): FormState {
+  return { success: true, message };
 }

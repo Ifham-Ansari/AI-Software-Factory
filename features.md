@@ -38,11 +38,11 @@ registry is corrected — the registry follows the code, not the other way aroun
 >
 > | Suite | Count | Environment |
 > |---|---|---|
-> | Backend (unit, integration, security, failure) | 355 | Real PostgreSQL (Neon), 0 skipped |
-> | Frontend component and validation | 32 | jsdom |
-> | End-to-end (Playwright) | 10 | Full stack: Next.js + FastAPI + PostgreSQL |
+> | Backend (unit, integration, security, failure) | 393 | Real PostgreSQL (Neon), 0 skipped |
+> | Frontend component and validation | 40 | jsdom |
+> | End-to-end (Playwright) | 12 | Full stack: Next.js + FastAPI + PostgreSQL |
 >
-> Backend coverage is 93% on `packages/core` against a gate of 85%.
+> Backend coverage is 91% on `packages/core` against a gate of 85%.
 >
 > The integration suite runs against a dedicated throwaway database, never the application
 > one. See [README.md](README.md#test) for how to point it at yours.
@@ -54,7 +54,7 @@ registry is corrected — the registry follows the code, not the other way aroun
 | F-103 | Async persistence layer (psycopg3 engine, session, unit of work) | VERIFIED | F-102 | `packages/core/persistence/` | unit + integration | Session commits/rolls back correctly under concurrency |
 | F-104 | Alembic migrations | VERIFIED | F-103 | `packages/core/migrations/` | integration | `upgrade head` and `downgrade base` both succeed clean |
 | F-105 | Scoped repository pattern | VERIFIED | F-103 | `packages/core/persistence/repositories/` | unit + integration | Repository cannot be constructed without a scope |
-| F-106 | User registration & Argon2id hashing | VERIFIED | F-105 | `packages/core/security/`, `apps/api/routers/auth.py` | unit + integration | Duplicate email rejected; hash never returned |
+| F-106 | User registration, email OTP verification & Argon2id hashing | VERIFIED | F-105 | `packages/core/security/`, `packages/core/application/auth/verification.py`, `apps/api/routers/auth.py` | unit + integration + security | Duplicate email rejected; hash never returned; sign-in refused until the emailed code is redeemed; code never logged, returned, or reusable |
 | F-107 | JWT access + rotating refresh tokens with reuse detection | VERIFIED | F-106 | `packages/core/security/tokens.py` | unit + integration + failure | Reused refresh token revokes the whole family |
 | F-108 | Authorization guard & project ownership | VERIFIED | F-107 | `apps/api/dependencies/` | integration + failure | Cross-user access returns 404, not 403 |
 | F-109 | Audit log writer | VERIFIED | F-108 | `packages/core/domain/audit/` | integration | Every mutating action writes an attributable row |

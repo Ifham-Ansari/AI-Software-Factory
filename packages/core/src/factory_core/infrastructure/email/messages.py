@@ -11,6 +11,7 @@ and some corporate gateways strip HTML entirely.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -22,6 +23,17 @@ class EmailMessage:
     subject: str
     text_body: str
     html_body: str
+
+
+def extract_code(text_body: str, *, length: int = 6) -> str | None:
+    """Pull a bare numeric code out of a message body, or ``None`` if none is present.
+
+    One implementation shared by the test double and the test-environment debug endpoint,
+    so both agree on where a code can appear — the verification service itself never
+    returns or logs one.
+    """
+    match = re.search(rf"\b(\d{{{length}}})\b", text_body)
+    return match.group(1) if match else None
 
 
 def _escape(value: str) -> str:

@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import SecretStr
 
-from factory_core.application.auth import AuthService, RegisterCommand, SignInCommand
+from factory_core.application.auth import AuthService, SignInCommand
 from factory_core.application.ports import FrozenClock
 from factory_core.domain.audit import AuditAction
 from factory_core.errors import (
@@ -52,10 +52,22 @@ class Harness:
             request_id="test-request",
         )
 
-    async def register(self, email: str = EMAIL, password: str = PASSWORD):  # type: ignore[no-untyped-def]
-        return await self.service.register(
-            RegisterCommand(email=email, password=SecretStr(password), display_name="Ada Lovelace")
+    async def register_and_sign_in(self, email: str = EMAIL, password: str = PASSWORD):  # type: ignore[no-untyped-def]
+        """Register, verify without a real code, and sign in for a session.
+
+        The verification flow itself is exercised in ``test_email_verification.py``; this
+        suite only needs a usable, signed-in account.
+        """
+        from factory_core.application.auth import RegisterCommand
+
+        user = await self.service.register(
+            RegisterCommand(email=email, password=SecretStr(password), display_name="Ada")
         )
+        self.users.verify(user.id)
+        return await self.service.sign_in(SignInCommand(email=email, password=SecretStr(password)))
+
+    async def sign_in(self, email: str = EMAIL, password: str = PASSWORD):  # type: ignore[no-untyped-def]
+        return await self.service.sign_in(SignInCommand(email=email, password=SecretStr(password)))
 
 
 @pytest.fixture
@@ -69,7 +81,7 @@ class TestReuseDetection:
     """The property that makes rotation worth doing."""
 
     async def test_reusing_a_rotated_token_is_refused(self, harness: Harness) -> None:
-        session = await harness.register()
+        session = await harness.register_and_sign_in()
         await harness.service.refresh(session.refresh_token)
 
         with pytest.raises(TokenReusedError):
@@ -77,7 +89,7 @@ class TestReuseDetection:
 
     async def test_reuse_revokes_the_entire_family(self, harness: Harness) -> None:
         """A stolen token must be usable at most once, and must cost the thief the session."""
-        session = await harness.register()
+        session = await harness.register_and_sign_in()
         current = await harness.service.refresh(session.refresh_token)
 
         with pytest.raises(TokenReusedError):
@@ -89,7 +101,7 @@ class TestReuseDetection:
             await harness.service.refresh(current.refresh_token)
 
     async def test_reuse_is_audited(self, harness: Harness) -> None:
-        session = await harness.register()
+        session = await harness.register_and_sign_in()
         await harness.service.refresh(session.refresh_token)
 
         with pytest.raises(TokenReusedError):
@@ -99,10 +111,8 @@ class TestReuseDetection:
 
     async def test_other_sessions_survive_a_revoked_family(self, harness: Harness) -> None:
         """Revocation must be scoped to the compromised family, not the whole account."""
-        first = await harness.register()
-        second = await harness.service.sign_in(
-            SignInCommand(email=EMAIL, password=SecretStr(PASSWORD))
-        )
+        first = await harness.register_and_sign_in()
+        second = await harness.sign_in()
         await harness.service.refresh(first.refresh_token)
 
         with pytest.raises(TokenReusedError):
@@ -116,7 +126,7 @@ class TestReuseDetection:
             await harness.service.refresh("not-a-real-token")
 
     async def test_expired_token_rejected(self, harness: Harness) -> None:
-        session = await harness.register()
+        session = await harness.register_and_sign_in()
         harness.clock.advance(REFRESH_TTL + 1)
 
         with pytest.raises(TokenExpiredError):

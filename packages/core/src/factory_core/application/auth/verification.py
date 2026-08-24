@@ -43,9 +43,14 @@ logger = get_logger(__name__)
 
 
 class VerificationError(AppError):
-    """The submitted code could not be accepted."""
+    """The submitted code could not be accepted.
 
-    code = ErrorCode.VALIDATION_FAILED
+    Its own code rather than ``VALIDATION_FAILED``: this carries no per-field detail, and
+    reusing that code would make it indistinguishable from a genuine request-shape error to
+    a client branching on ``error.code``.
+    """
+
+    code = ErrorCode.INVALID_CODE
     status_code = 400
     message = "That code is not valid."
 

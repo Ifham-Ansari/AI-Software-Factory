@@ -34,6 +34,16 @@ export class ApiError extends Error {
     return this.code === "validation_failed";
   }
 
+  /** Whether sign-in was refused because the account's email is unverified. */
+  get isEmailNotVerified(): boolean {
+    return this.code === "email_not_verified";
+  }
+
+  /** Whether a verification code was wrong, expired, or exhausted. */
+  get isInvalidCode(): boolean {
+    return this.code === "invalid_code";
+  }
+
   /** Field-level messages, keyed by field name, for rendering next to inputs. */
   fieldErrors(): Record<string, string> {
     return Object.fromEntries(this.fields.map((f) => [f.field, f.message]));

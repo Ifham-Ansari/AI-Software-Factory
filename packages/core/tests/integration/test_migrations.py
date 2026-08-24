@@ -23,7 +23,7 @@ from factory_core.persistence import Base, create_engine
 
 pytestmark = pytest.mark.integration
 
-EXPECTED_TABLES = {"users", "refresh_tokens", "projects", "audit_log"}
+EXPECTED_TABLES = {"users", "refresh_tokens", "projects", "audit_log", "email_verifications"}
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -125,6 +125,39 @@ class TestMigrations:
         for table_name in EXPECTED_TABLES:
             expected = {column.name for column in Base.metadata.tables[table_name].columns}
             assert migrated[table_name] == expected, f"{table_name} drifted from the model"
+
+    async def test_0002_backfills_existing_users_as_verified(
+        self, clean_engine: AsyncEngine, database_url: str
+    ) -> None:
+        """Accounts created before verification existed must not be locked out.
+
+        They had no way to satisfy a rule that did not exist yet, so 0002 grandfathers
+        them in rather than leaving every current user unable to sign in.
+        """
+        from sqlalchemy import text
+
+        await _alembic("upgrade", database_url, "0001")
+
+        async with clean_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "INSERT INTO users (id, email, display_name, password_hash, status, "
+                    "created_at, updated_at) VALUES "
+                    "(gen_random_uuid(), 'pre-existing@example.com', 'Pre Existing', "
+                    "'$argon2id$fake', 'active', now(), now())"
+                )
+            )
+
+        await _alembic("upgrade", database_url, "head")
+
+        async with clean_engine.connect() as connection:
+            result = await connection.execute(
+                text(
+                    "SELECT email_verified_at FROM users WHERE email = 'pre-existing@example.com'"
+                )
+            )
+            verified_at = result.scalar_one()
+        assert verified_at is not None
 
     async def test_constraint_names_match_the_convention(
         self, clean_engine: AsyncEngine, database_url: str
