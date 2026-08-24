@@ -309,6 +309,19 @@ pnpm --filter web lint
 pnpm -r typecheck
 ```
 
+> **On Windows, also run mypy the way CI will.** mypy narrows `sys.platform` to the host
+> it is checking on, so a Windows-only branch is live locally and *dead code* on Linux —
+> which `warn_unreachable` reports as an error. That passes here and fails in CI:
+>
+> ```bash
+> uv run mypy --platform linux packages/core/src apps/api/src apps/worker/src scripts
+> ```
+>
+> Guard platform-specific code with a positive `if sys.platform == "win32":` block rather
+> than an early `if sys.platform != "win32": return`. mypy skips a guarded block silently,
+> but treats statements after an always-taken return as unreachable. Both functions in
+> `packages/core/src/factory_core/runtime.py` are written that way for this reason.
+
 `lint-imports` enforces layering: `core` may not import a web framework, `domain` may not
 import SQLAlchemy, and the API and worker must stay independent processes. A violation
 fails the build rather than becoming a review comment.

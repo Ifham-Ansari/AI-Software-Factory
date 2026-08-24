@@ -37,11 +37,15 @@ def configure_event_loop() -> None:
 
     A no-op everywhere except Windows. Safe to call more than once.
     """
-    if sys.platform != "win32":
-        return
-    policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
-    if policy is not None:
-        asyncio.set_event_loop_policy(policy())
+    # Guarded by a positive `== "win32"` check rather than an early return, for the same
+    # reason as event_loop_factory below: mypy narrows sys.platform to the *checking*
+    # host, so `if sys.platform != "win32": return` makes everything after it unreachable
+    # when the check runs on Linux — which is what CI does. A platform-guarded block is
+    # skipped silently instead of reported.
+    if sys.platform == "win32":
+        policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+        if policy is not None:
+            asyncio.set_event_loop_policy(policy())
 
 
 def event_loop_factory() -> Callable[[], asyncio.AbstractEventLoop] | None:
