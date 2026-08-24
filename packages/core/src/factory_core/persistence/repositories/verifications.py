@@ -123,9 +123,7 @@ class VerificationRepository(Repository):
         Returns:
             How many rows were deleted.
         """
-        statement = delete(EmailVerificationRow).where(
-            EmailVerificationRow.expires_at < before
-        )
+        statement = delete(EmailVerificationRow).where(EmailVerificationRow.expires_at < before)
         result = await self._session.execute(statement)
         return int(cast(CursorResult[Any], result).rowcount or 0)
 

@@ -106,9 +106,7 @@ class FakeUserRepository:
     def verify(self, user_id: UserId) -> None:
         """Test helper: mark an account verified without going through a code."""
         user = self.users[user_id]
-        self.users[user_id] = user.model_copy(
-            update={"email_verified_at": datetime.now(UTC)}
-        )
+        self.users[user_id] = user.model_copy(update={"email_verified_at": datetime.now(UTC)})
 
     def suspend(self, user_id: UserId) -> None:
         """Test helper: mark an account suspended."""

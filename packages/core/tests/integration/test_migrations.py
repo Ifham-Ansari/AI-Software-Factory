@@ -152,9 +152,7 @@ class TestMigrations:
 
         async with clean_engine.connect() as connection:
             result = await connection.execute(
-                text(
-                    "SELECT email_verified_at FROM users WHERE email = 'pre-existing@example.com'"
-                )
+                text("SELECT email_verified_at FROM users WHERE email = 'pre-existing@example.com'")
             )
             verified_at = result.scalar_one()
         assert verified_at is not None

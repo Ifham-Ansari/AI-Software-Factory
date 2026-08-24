@@ -146,9 +146,7 @@ def app(settings: Settings, fakes: Fakes) -> FastAPI:
     application.dependency_overrides[get_user_repository] = lambda: fakes.users
     application.dependency_overrides[get_refresh_token_repository] = lambda: fakes.tokens
     application.dependency_overrides[get_audit_repository] = lambda: fakes.audit
-    application.dependency_overrides[get_verification_repository] = (
-        lambda: fakes.verifications
-    )
+    application.dependency_overrides[get_verification_repository] = lambda: fakes.verifications
     application.dependency_overrides[get_email_sender] = lambda: fakes.emails
     application.dependency_overrides[get_project_repository] = scoped_projects
     return application

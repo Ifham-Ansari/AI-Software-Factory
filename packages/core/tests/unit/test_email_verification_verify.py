@@ -95,9 +95,7 @@ class TestVerify:
         with pytest.raises(CodeExpiredError):
             await harness.service.verify(user, code)
 
-    async def test_verifying_twice_is_idempotent_on_the_timestamp(
-        self, harness: Harness
-    ) -> None:
+    async def test_verifying_twice_is_idempotent_on_the_timestamp(self, harness: Harness) -> None:
         """Re-verifying an already-verified account must not reset when it was proven."""
         user = harness.make_user()
         harness.users.verify(user.id)

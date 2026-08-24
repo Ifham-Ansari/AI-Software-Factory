@@ -164,9 +164,7 @@ class TestSmtpDeliverability:
         with pytest.raises(ConfigurationError, match="together"):
             load_settings()
 
-    def test_a_complete_gmail_configuration_loads(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_complete_gmail_configuration_loads(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _email_env(
             monkeypatch,
             TRANSPORT="smtp",

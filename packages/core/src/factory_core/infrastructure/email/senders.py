@@ -112,9 +112,7 @@ class SmtpEmailSender:
             if settings.smtp_use_tls:
                 client.starttls()
             if settings.smtp_username and settings.smtp_password:
-                client.login(
-                    settings.smtp_username, settings.smtp_password.get_secret_value()
-                )
+                client.login(settings.smtp_username, settings.smtp_password.get_secret_value())
             client.send_message(mime)
 
 

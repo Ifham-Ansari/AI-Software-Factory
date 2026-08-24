@@ -43,10 +43,7 @@ def _escape(value: str) -> str:
     a name containing markup would be rendered by the recipient's client.
     """
     return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
+        value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     )
 
 

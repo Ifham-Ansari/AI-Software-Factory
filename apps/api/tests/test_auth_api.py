@@ -36,9 +36,7 @@ class TestRegister:
             json={"email": EMAIL, "password": PASSWORD, "display_name": "Ada"},
         )
 
-        response = await client.post(
-            "/auth/sign-in", json={"email": EMAIL, "password": PASSWORD}
-        )
+        response = await client.post("/auth/sign-in", json={"email": EMAIL, "password": PASSWORD})
 
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "email_not_verified"
@@ -56,9 +54,7 @@ class TestRegister:
         assert "argon2" not in raw
 
     @pytest.mark.security
-    async def test_response_never_contains_the_code(
-        self, client: AsyncClient, fakes
-    ) -> None:  # type: ignore[no-untyped-def]
+    async def test_response_never_contains_the_code(self, client: AsyncClient, fakes) -> None:  # type: ignore[no-untyped-def]
         """The code is emailed, never returned in the API response."""
         response = await client.post(
             "/auth/register",

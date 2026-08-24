@@ -77,8 +77,7 @@ class EmailSettings(BaseSettings):
         if not isinstance(values, dict):
             return values
         trimmed = {
-            key: value.strip() if isinstance(value, str) else value
-            for key, value in values.items()
+            key: value.strip() if isinstance(value, str) else value for key, value in values.items()
         }
         return {key: value for key, value in trimmed.items() if value != ""}
 
@@ -108,9 +107,7 @@ class EmailSettings(BaseSettings):
         # Username without password (or vice versa) is always a mistake. Neither is fine:
         # a local relay such as Mailpit accepts unauthenticated mail.
         if bool(self.smtp_username) != bool(self.smtp_password):
-            problems.append(
-                "EMAIL__SMTP_USERNAME and EMAIL__SMTP_PASSWORD must be set together"
-            )
+            problems.append("EMAIL__SMTP_USERNAME and EMAIL__SMTP_PASSWORD must be set together")
         if problems:
             raise ValueError("; ".join(problems))
         return self

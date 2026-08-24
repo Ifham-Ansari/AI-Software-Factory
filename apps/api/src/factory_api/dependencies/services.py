@@ -102,7 +102,5 @@ def get_verification_service(
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
-VerificationServiceDep = Annotated[
-    EmailVerificationService, Depends(get_verification_service)
-]
+VerificationServiceDep = Annotated[EmailVerificationService, Depends(get_verification_service)]
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]

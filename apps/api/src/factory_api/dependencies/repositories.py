@@ -43,12 +43,12 @@ def get_audit_repository(session: SessionDep) -> AuditRepository:
 
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
 RefreshTokenRepositoryDep = Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)]
+
+
 def get_verification_repository(session: SessionDep) -> VerificationRepository:
     """Provide the email-verification repository."""
     return VerificationRepository(session)
 
 
 AuditRepositoryDep = Annotated[AuditRepository, Depends(get_audit_repository)]
-VerificationRepositoryDep = Annotated[
-    VerificationRepository, Depends(get_verification_repository)
-]
+VerificationRepositoryDep = Annotated[VerificationRepository, Depends(get_verification_repository)]

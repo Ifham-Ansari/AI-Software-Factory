@@ -151,9 +151,7 @@ class AuthService:
             # Only reachable with the correct password, so this is not an enumeration
             # vector — and the caller needs to know to go and enter their code.
             await self._record(
-                AuditRequest.for_user(
-                    AuditAction.USER_SIGN_IN_FAILED, user.id, reason="unverified"
-                )
+                AuditRequest.for_user(AuditAction.USER_SIGN_IN_FAILED, user.id, reason="unverified")
             )
             raise EmailNotVerifiedError
 

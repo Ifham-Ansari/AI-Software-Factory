@@ -8,9 +8,11 @@ from factory_core.config import Environment, load_settings
 from factory_core.config.settings import (
     ApiSettings,
     DatabaseSettings,
+    EmailSettings,
     ObservabilitySettings,
     SecuritySettings,
     Settings,
+    VerificationSettings,
 )
 from factory_core.errors import ConfigurationError
 
@@ -31,6 +33,23 @@ _MANAGED_VARS = (
     "API__DOCS_ENABLED",
     "OBSERVABILITY__LOG_FORMAT",
     "ENVIRONMENT",
+    # A developer who configures real mail locally must not flip the result of the
+    # production-hardening tests, which assert on the *default* transport.
+    "EMAIL__TRANSPORT",
+    "EMAIL__FROM_ADDRESS",
+    "EMAIL__SMTP_HOST",
+    "EMAIL__SMTP_USERNAME",
+    "EMAIL__SMTP_PASSWORD",
+)
+
+_SETTINGS_MODELS = (
+    Settings,
+    DatabaseSettings,
+    SecuritySettings,
+    ObservabilitySettings,
+    ApiSettings,
+    EmailSettings,
+    VerificationSettings,
 )
 
 
@@ -42,10 +61,14 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     developer's local ``.env`` from silently satisfying a "missing variable" test — which
     would make the suite pass on their machine and fail in CI. ``setitem`` restores the
     original value afterwards, so class state does not leak between tests.
+
+    Every settings model needs detaching, not just the required ones: the root conftest
+    also loads ``.env`` into ``os.environ``, so a section left attached picks up local
+    values through both routes.
     """
     for name in _MANAGED_VARS:
         monkeypatch.delenv(name, raising=False)
-    for model in (Settings, DatabaseSettings, SecuritySettings, ObservabilitySettings, ApiSettings):
+    for model in _SETTINGS_MODELS:
         monkeypatch.setitem(model.model_config, "env_file", "nonexistent.env")
 
 

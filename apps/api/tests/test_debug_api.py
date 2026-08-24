@@ -108,9 +108,7 @@ class TestDebugEndpointBehavior:
 
         sender = ConsoleEmailSender()
         await sender.send(
-            verification_email(
-                to=EMAIL, display_name="Ada", code="123456", expires_in_minutes=10
-            )
+            verification_email(to=EMAIL, display_name="Ada", code="123456", expires_in_minutes=10)
         )
 
         app.dependency_overrides[get_user_repository] = lambda: users
@@ -121,9 +119,7 @@ class TestDebugEndpointBehavior:
             app.router.lifespan_context(app),
             AsyncClient(transport=transport, base_url="http://test") as client,
         ):
-            response = await client.get(
-                "/debug/verification-code", params={"email": EMAIL}
-            )
+            response = await client.get("/debug/verification-code", params={"email": EMAIL})
 
         assert response.status_code == 200, response.text
         assert response.json()["code"] == "123456"
@@ -159,8 +155,6 @@ class TestDebugEndpointBehavior:
             app.router.lifespan_context(app),
             AsyncClient(transport=transport, base_url="http://test") as client,
         ):
-            response = await client.get(
-                "/debug/verification-code", params={"email": EMAIL}
-            )
+            response = await client.get("/debug/verification-code", params={"email": EMAIL})
 
         assert response.status_code == 404

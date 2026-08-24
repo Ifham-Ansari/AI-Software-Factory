@@ -104,9 +104,7 @@ class VerificationChallengeResponse(BaseModel):
 
     email: str
     expires_in: int = Field(description="Seconds until the code expires.")
-    resend_available_in: int = Field(
-        description="Seconds before another code may be requested."
-    )
+    resend_available_in: int = Field(description="Seconds before another code may be requested.")
     message: str = "Check your email for a verification code."
 
 

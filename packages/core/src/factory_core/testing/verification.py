@@ -26,9 +26,7 @@ class FakeVerificationRepository:
 
     async def count_issued_since(self, user_id: UserId, *, since: datetime) -> int:
         """Count codes issued to a user since a cutoff."""
-        return sum(
-            1 for c in self.codes.values() if c.user_id == user_id and c.issued_at >= since
-        )
+        return sum(1 for c in self.codes.values() if c.user_id == user_id and c.issued_at >= since)
 
     async def record_attempt(self, verification_id: VerificationId) -> int:
         """Increment the attempt counter, returning the new count."""
@@ -58,9 +56,7 @@ class FakeVerificationRepository:
         count = 0
         for key, record in list(self.codes.items()):
             if record.user_id == user_id and record.status is VerificationStatus.PENDING:
-                self.codes[key] = record.model_copy(
-                    update={"status": VerificationStatus.EXPIRED}
-                )
+                self.codes[key] = record.model_copy(update={"status": VerificationStatus.EXPIRED})
                 count += 1
         return count
 

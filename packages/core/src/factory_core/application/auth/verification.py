@@ -191,9 +191,7 @@ class EmailVerificationService:
             attempts = await self._verifications.record_attempt(record.id)
             remaining = record.max_attempts - attempts
             if remaining <= 0:
-                await self._verifications.mark(
-                    record.id, VerificationStatus.EXHAUSTED, now=now
-                )
+                await self._verifications.mark(record.id, VerificationStatus.EXHAUSTED, now=now)
                 await self._record(AuditAction.VERIFICATION_EXHAUSTED, user)
                 logger.warning("verification.exhausted", user_id=str(user.id))
                 raise CodeExhaustedError
