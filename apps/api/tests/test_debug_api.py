@@ -71,7 +71,11 @@ class TestRouterGating:
     def test_absent_in_production(self) -> None:
         settings = _settings(
             Environment.PRODUCTION,
-            email=EmailSettings(transport="smtp", smtp_host="smtp.example.com"),
+            email=EmailSettings(
+                transport="smtp",
+                smtp_host="smtp.example.com",
+                from_address="no-reply@example.com",
+            ),
         )
         assert not _has_debug_route(create_app(settings))
 

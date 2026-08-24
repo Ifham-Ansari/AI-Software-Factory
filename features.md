@@ -38,7 +38,7 @@ registry is corrected — the registry follows the code, not the other way aroun
 >
 > | Suite | Count | Environment |
 > |---|---|---|
-> | Backend (unit, integration, security, failure) | 393 | Real PostgreSQL (Neon), 0 skipped |
+> | Backend (unit, integration, security, failure) | 403 | Real PostgreSQL (Neon), 0 skipped |
 > | Frontend component and validation | 40 | jsdom |
 > | End-to-end (Playwright) | 12 | Full stack: Next.js + FastAPI + PostgreSQL |
 >

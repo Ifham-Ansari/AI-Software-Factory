@@ -179,6 +179,54 @@ pnpm --filter web dev        # Next.js      → http://127.0.0.1:3000
 
 Then open http://127.0.0.1:3000 and register an account.
 
+#### Where the verification code goes
+
+Registration emails a 6-digit code, and the account cannot sign in until it is redeemed.
+Out of the box `EMAIL__TRANSPORT=console`, which means **the code is printed in the
+`uv run dev-api` terminal rather than emailed** — no mail account needed to develop:
+
+```
+[warning] email.console_transport  to=you@example.com
+    Your verification code is: 047743
+```
+
+To send real mail instead, set the SMTP block in `.env`. With Gmail:
+
+1. Turn on 2-Step Verification — <https://myaccount.google.com/security>
+2. Create an **App Password** (16 characters) — <https://myaccount.google.com/apppasswords>
+   Your normal Google password will not work; Google disabled it for SMTP in 2022.
+3. Fill in and switch the transport:
+
+```ini
+EMAIL__TRANSPORT=smtp
+EMAIL__FROM_ADDRESS=you@gmail.com     # must match SMTP_USERNAME, or Google rejects it
+EMAIL__SMTP_HOST=smtp.gmail.com
+EMAIL__SMTP_PORT=587
+EMAIL__SMTP_USERNAME=you@gmail.com
+EMAIL__SMTP_PASSWORD=abcd efgh ijkl mnop
+```
+
+Startup validates this and refuses to run on a configuration that cannot deliver — a
+missing host, a sender left as the placeholder, or a username without a password — so a
+typo surfaces as a named variable at boot rather than as a failed signup.
+
+Prefer not to use a personal mailbox? Point it at a local catcher and read the mail in a
+browser — no credentials, nothing leaves the machine:
+
+```bash
+docker run -d -p 1025:1025 -p 8025:8025 axllent/mailpit   # inbox at :8025
+```
+```ini
+EMAIL__TRANSPORT=smtp
+EMAIL__FROM_ADDRESS=dev@example.com
+EMAIL__SMTP_HOST=127.0.0.1
+EMAIL__SMTP_PORT=1025
+EMAIL__SMTP_USE_TLS=false
+```
+
+`console` is refused in production, because it would write a live credential into a log
+aggregator.
+
 > **On Windows, start the backend with `uv run dev-api`, not `uvicorn` directly.**
 > psycopg's async mode cannot use Windows' default `ProactorEventLoop`, and uvicorn selects
 > its loop through a factory that ignores the asyncio policy. `dev-api` owns the loop and
@@ -235,6 +283,18 @@ uv run dev                            # or the three commands separately
 pnpm --filter web exec playwright install chromium   # once
 pnpm --filter web test:e2e
 ```
+
+> **The signup specs need `EMAIL__TRANSPORT=console`.** They read the verification code
+> from a debug endpoint that only exists in development/test, and that endpoint serves the
+> console transport only — it refuses to hand out a code once real mail is configured,
+> which is the point of it. If your `.env` is set to `smtp`, start the API with the
+> transport overridden for the run:
+>
+> ```bash
+> EMAIL__TRANSPORT=console uv run dev-api      # PowerShell: $env:EMAIL__TRANSPORT="console"
+> ```
+>
+> CI is unaffected: it has no `.env`, so it already defaults to `console`.
 
 ### Quality gates
 

@@ -180,7 +180,7 @@ diffable, reviewable, offline-capable, and recorded per call.
 | Phase | **1 complete** — Platform Foundation & Contracts |
 | Next | **Phase 2 — Secure Configuration, Secrets & Realtime Backbone** ([plan.md](plan.md) §5) |
 | Features | **18 VERIFIED** of 127 ([features.md](features.md)) |
-| Tests | 393 backend (0 skipped, 91% coverage) · 40 frontend · 12 e2e — all green |
+| Tests | 403 backend (0 skipped, 91% coverage) · 40 frontend · 12 e2e — all green |
 
 **What exists.** A working platform: registration with email OTP verification, sign-in,
 rotating refresh tokens with theft detection, project CRUD scoped per owner, an audit

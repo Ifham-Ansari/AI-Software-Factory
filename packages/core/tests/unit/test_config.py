@@ -168,15 +168,17 @@ class TestProductionHardening:
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("API__DOCS_ENABLED", "false")
         # The console email transport prints one-time codes to the log, so production
-        # also requires a real transport to be configured.
+        # also requires a real transport — host and a deliverable sender both.
         monkeypatch.setenv("EMAIL__TRANSPORT", "smtp")
         monkeypatch.setenv("EMAIL__SMTP_HOST", "smtp.example.com")
+        monkeypatch.setenv("EMAIL__FROM_ADDRESS", "no-reply@example.com")
 
         settings = load_settings()
 
         assert settings.environment.is_production
         assert not settings.api.docs_enabled
         assert settings.email.transport == "smtp"
+        assert settings.email.is_configured
 
     def test_console_email_transport_refused_in_production(
         self, monkeypatch: pytest.MonkeyPatch
