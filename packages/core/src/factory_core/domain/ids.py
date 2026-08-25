@@ -20,6 +20,10 @@ TokenId = NewType("TokenId", uuid.UUID)
 TokenFamilyId = NewType("TokenFamilyId", uuid.UUID)
 AuditEntryId = NewType("AuditEntryId", uuid.UUID)
 VerificationId = NewType("VerificationId", uuid.UUID)
+SecretId = NewType("SecretId", uuid.UUID)
+RunId = NewType("RunId", uuid.UUID)
+EventId = NewType("EventId", uuid.UUID)
+JobId = NewType("JobId", uuid.UUID)
 
 
 def new_id() -> uuid.UUID:
@@ -50,6 +54,26 @@ def new_token_family_id() -> TokenFamilyId:
 def new_verification_id() -> VerificationId:
     """Generate a fresh email-verification identifier."""
     return VerificationId(new_id())
+
+
+def new_secret_id() -> SecretId:
+    """Generate a fresh secret identifier."""
+    return SecretId(new_id())
+
+
+def new_run_id() -> RunId:
+    """Generate a fresh workflow-run identifier."""
+    return RunId(new_id())
+
+
+def new_event_id() -> EventId:
+    """Generate a fresh event identifier."""
+    return EventId(new_id())
+
+
+def new_job_id() -> JobId:
+    """Generate a fresh job identifier."""
+    return JobId(new_id())
 
 
 def parse_uuid(value: str) -> uuid.UUID | None:

@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import type { ProjectResponse } from "@factory/contracts";
+import type { ProjectResponse, RunResponse } from "@factory/contracts";
 import { apiRequest } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
 import { StatusBadge } from "@/components/ui";
 import { ProjectActions } from "@/features/projects/ProjectActions";
+import { ActivityFeed } from "@/features/runs/ActivityFeed";
+import { ProjectConfiguration } from "@/features/projects/ProjectConfiguration";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -39,9 +41,29 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }
 }
 
+/**
+ * Ensure the project has a run to stream events against.
+ *
+ * Phase 3's graph will create runs as part of starting work. Until then the detail page
+ * creates one on demand so the realtime pipeline has something to attach to; a failure
+ * here degrades the activity feed rather than the page, so it returns null instead of
+ * throwing.
+ */
+async function ensureRun(projectId: string): Promise<string | null> {
+  try {
+    const run = await apiRequest<RunResponse>(`/projects/${projectId}/runs`, {
+      method: "POST",
+    });
+    return run.id;
+  } catch {
+    return null;
+  }
+}
+
 export default async function ProjectDetailPage({ params }: PageProps) {
   const { id } = await params;
   const project = await loadProject(id);
+  const runId = await ensureRun(id);
 
   return (
     <article className="project-detail">
@@ -76,6 +98,10 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       </dl>
 
       <ProjectActions project={project} />
+
+      <ProjectConfiguration projectId={project.id} />
+
+      <ActivityFeed projectId={project.id} runId={runId} />
     </article>
   );
 }

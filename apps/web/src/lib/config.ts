@@ -33,3 +33,18 @@ export const API_TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS ?? 30_000);
  * localhost, where `Secure` cookies are simply dropped.
  */
 export const COOKIES_SECURE = process.env.NODE_ENV === "production";
+
+/**
+ * Origin the browser opens the event WebSocket against.
+ *
+ * The one place the browser does learn where the API lives, and it is unavoidable: a
+ * WebSocket cannot be proxied through a Next.js route handler the way every REST call is.
+ *
+ * It is not `NEXT_PUBLIC_`, though. The value is returned by the authenticated ws-ticket
+ * route rather than compiled into the bundle, so it reaches signed-in callers only — and
+ * the socket still requires a single-use ticket, so knowing the URL grants nothing.
+ *
+ * Derived from `API_BASE_URL` by default: http becomes ws, https becomes wss.
+ */
+export const WS_BASE_URL =
+  process.env.WS_BASE_URL ?? API_BASE_URL.replace(/^http/, "ws");

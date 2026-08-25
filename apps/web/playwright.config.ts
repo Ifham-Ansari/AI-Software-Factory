@@ -11,11 +11,24 @@ import { defineConfig, devices } from "@playwright/test";
  * migrated database, and a `webServer` block that silently fails to connect produces a
  * confusing timeout instead of a clear "your stack is not up" message.
  *
- *   Terminal 1:  uv run dev-api
- *   Terminal 2:  pnpm --filter web dev
- *   Terminal 3:  pnpm --filter web test:e2e
+ *   Terminal 1:  EMAIL__TRANSPORT=console VERIFICATION__RESEND_COOLDOWN_SECONDS=0 uv run dev-api
+ *   Terminal 2:  uv run dev-worker
+ *   Terminal 3:  pnpm --filter web dev
+ *   Terminal 4:  pnpm --filter web test:e2e
  *
- * CI starts both processes before invoking this; see .github/workflows/ci.yml.
+ * The two API overrides matter, and a populated .env will otherwise break the run:
+ *
+ *   - `EMAIL__TRANSPORT=console` — registration codes are read from the debug endpoint,
+ *     which has nothing to read if mail actually went out over SMTP.
+ *   - `VERIFICATION__RESEND_COOLDOWN_SECONDS=0` — the real 60s cooldown makes the resend
+ *     spec race a production rate limit. That enforcement is proven in the unit suite.
+ *
+ * The worker is not optional: the realtime specs enqueue a job and wait for its events,
+ * and with nothing to claim it they time out.
+ *
+ * CI sets all of this and starts every process before invoking this; see
+ * .github/workflows/ci.yml, which runs the suite twice — once with Redis fan-out enabled
+ * and once with it unavailable.
  */
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 

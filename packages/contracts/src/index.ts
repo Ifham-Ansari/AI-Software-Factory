@@ -55,3 +55,26 @@ export type PaginatedProjects = Schemas["PaginatedResponse_ProjectResponse_"];
 export type HealthResponse = Schemas["HealthResponse"];
 export type ReadinessResponse = Schemas["ReadinessResponse"];
 export type MessageResponse = Schemas["MessageResponse"];
+
+// --- Secrets and configuration (Phase 2) ------------------------------------
+//
+// There is deliberately no type here carrying a secret *value* out of the API. The
+// backend has no response model with such a field, so generating one would be a signal
+// that the write-only guarantee had been broken.
+
+export type StoreSecretRequest = Schemas["StoreSecretRequest"];
+export type SecretResponse = Schemas["SecretResponse"];
+export type SecretListResponse = Schemas["SecretListResponse"];
+export type AddRequirementRequest = Schemas["AddRequirementRequest"];
+export type RequirementResponse = Schemas["RequirementResponse"];
+export type ConfigurationResponse = Schemas["ConfigurationResponse"];
+
+// --- Runs, events and jobs (Phase 2) ----------------------------------------
+
+export type RunResponse = Schemas["RunResponse"];
+export type EventResponse = Schemas["EventResponse"];
+export type EventPageResponse = Schemas["EventPageResponse"];
+export type WebSocketTicketResponse = Schemas["WebSocketTicketResponse"];
+export type EnqueueJobRequest = Schemas["EnqueueJobRequest"];
+export type JobResponse = Schemas["JobResponse"];
+export type JobStatus = Schemas["JobStatus"];

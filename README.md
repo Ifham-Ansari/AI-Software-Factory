@@ -4,13 +4,21 @@ A hierarchical, supervised autonomous software engineering and deployment system
 application in natural language; an organization of AI agents plans it, builds it, tests it, deploys
 it, and hands you live URLs — escalating every high-risk decision to a human.
 
-> ## Status: Phase 1 complete — platform foundation
+> ## Status: Phase 2 complete — secrets and the realtime backbone
 >
-> Registration, sign-in, rotating refresh tokens with theft detection, per-owner project
-> CRUD, an audit trail, structured logging with secret redaction, generated TypeScript
-> contracts, and a Next.js control centre. **No AI agents yet** — those start in Phase 3.
+> **Phase 1** — registration with email verification, sign-in, rotating refresh tokens with
+> theft detection, per-owner project CRUD, an audit trail, structured logging with secret
+> redaction, generated TypeScript contracts, and a Next.js control centre.
 >
-> 355 backend tests (93% coverage) · 32 frontend tests · 10 end-to-end specs — all green
+> **Phase 2** — an envelope-encrypted secret vault that no endpoint can read back, config
+> requirement tracking, Redis rate limiting/idempotency/locks, durable per-run events with
+> gapless sequence numbers, a ticket-authenticated WebSocket with lossless reconnect, and a
+> Postgres job queue with a worker that drains on SIGTERM.
+>
+> **No AI agents yet** — those start in Phase 3. Everything above exists so the agent
+> runtime has somewhere safe to put credentials and something durable to run on.
+>
+> 614 backend tests (89% coverage) · 53 frontend tests · 16 end-to-end specs — all green
 > against real PostgreSQL and the full stack.
 >
 > See [plan.md](plan.md) for the roadmap and [features.md](features.md) for exact status.
@@ -100,18 +108,18 @@ Every choice, with the alternative it beat, is in [architecture.md](architecture
 
 ### Requirements
 
-For Phase 1, that is all you need:
-
 - Python 3.13 and [uv](https://docs.astral.sh/uv/) — uv installs the right Python for you
 - Node 22+ and pnpm
 - A PostgreSQL database — a [Neon](https://neon.com) project, or Docker locally
+- Optionally [Upstash Redis](https://upstash.com), for cross-replica event fan-out. The
+  platform works without it: events stay durable and clients replay over REST.
 
-Later phases add more: Upstash Redis (Phase 2), OpenAI and LangSmith (Phase 3), Docker for
-the code sandbox (Phase 5), GitHub/Vercel/Render tokens (Phases 5 and 7). None is needed
-to run what exists today.
+Later phases add more: OpenAI and LangSmith (Phase 3), Docker for the code sandbox
+(Phase 5), GitHub/Vercel/Render tokens (Phases 5 and 7). Neither is needed to run what
+exists today.
 
-If you already have those credentials, put them in `.env` now — configuration for Redis,
-OpenAI and LangSmith exists and validates them, and registers them with the log redactor at
+If you already have those credentials, put them in `.env` now — configuration for OpenAI
+and LangSmith exists and validates them, and registers them with the log redactor at
 startup. Nothing consumes them yet; `/ready` simply reports which are configured.
 
 ### Install
@@ -131,25 +139,45 @@ cp .env.example .env
 Fill in the required values. The application **fails fast at startup** if a required variable is
 missing, naming the variable.
 
-Two variables are required today:
+Two variables are required, and a third is required for the secret vault:
 
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string. A plain `postgresql://` URL is rewritten to the psycopg driver automatically, so a pasted Neon string works unmodified |
 | `JWT_SECRET_KEY` | Signs access tokens. At least 32 characters; startup refuses anything shorter |
-
-Generate a signing key:
+| `SECRETS__MASTER_KEY` | Encrypts stored project credentials. Without it the platform runs, but storing a secret returns 503 rather than falling back to storing it in the clear |
 
 ```bash
+# Signing key
 python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+# Master key for the secret vault
+uv run python scripts/generate_master_key.py
 ```
+
+> ⚠️ **Losing `SECRETS__MASTER_KEY` makes every stored secret permanently unrecoverable.**
+> It is never written to the database, so a database backup does not contain it. Back it up
+> before storing anything real, and read
+> [docs/runbooks/key-management.md](docs/runbooks/key-management.md) — it covers online
+> rotation, which needs no downtime.
+
+`REDIS_URL` is optional. Without it the platform works and every event is still durable in
+PostgreSQL; a browser recovers what it missed by replaying over REST. Redis buys latency,
+not correctness.
 
 Everything else has a working default — see [.env.example](.env.example), which documents
 each one and what it does.
 
 The frontend needs `API_BASE_URL` in `apps/web/.env.local` if the API is not on
 `http://127.0.0.1:8000`. It is deliberately **not** a `NEXT_PUBLIC_` variable: the browser
-never calls the API directly, so nothing about the backend's location reaches the bundle.
+never calls the REST API directly, so nothing about the backend's location reaches the
+bundle.
+
+The one exception is the event WebSocket, which cannot be proxied through a Next.js route
+handler. Its origin defaults to `API_BASE_URL` with `http` swapped for `ws`; override it
+with `WS_BASE_URL` when the API is behind a different public hostname. It is still not
+public — the URL is returned by the authenticated ticket route, and the handshake requires
+a single-use ticket regardless.
 
 ⚠️ **Never put a real secret in `.env.example`.** It is committed. Real values belong in
 `.env`, which is gitignored.
@@ -232,6 +260,26 @@ aggregator.
 > its loop through a factory that ignores the asyncio policy. `dev-api` owns the loop and
 > picks a compatible one; invoking uvicorn yourself produces an `InterfaceError` on the
 > first query that reads like a connectivity problem. Linux is unaffected.
+
+### Realtime and the job queue
+
+Open a project and the page shows a live activity feed with a connection indicator.
+"Run a test job" enqueues a `noop` job; the worker claims it, emits progress events, and
+they arrive over the WebSocket within a second or two.
+
+That path is the whole Phase 2 backbone end to end — enqueue in a transaction, claim with
+`SKIP LOCKED`, execute, persist with a per-run sequence number, publish through Redis, fan
+out to the browser. It exists to prove the pipeline before any agent needs it.
+
+**Reconnection is lossless.** Kill your network, run another job, and reconnect: the client
+replays from the last sequence number it saw, so the feed fills the gap with no duplicates.
+That works even with Redis stopped — the socket goes quiet, the events stay durable, and
+the replay delivers them.
+
+```bash
+# Watch the worker claim and run jobs
+uv run dev-worker
+```
 
 ### Test
 
@@ -368,7 +416,7 @@ and **no source file exceeds 250 lines** (enforced in CI).
 | Phase | Delivers | Status |
 |---|---|---|
 | 1 | Platform foundation, auth, projects, contracts, CI | **Complete** |
-| 2 | Secret vault, event bus, WebSocket, job queue | Not started |
+| 2 | Secret vault, event bus, WebSocket, job queue | **Complete** |
 | 3 | Agent runtime, tool framework, budgets, HITL, intake | Not started |
 | 4 | Hierarchical supervision, parallelism, recovery, arbitration | Not started |
 | 5 | Sandboxed workspace, code generation, git | Not started |

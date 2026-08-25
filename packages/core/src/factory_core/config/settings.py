@@ -28,6 +28,7 @@ from factory_core.config.integrations import (
     OpenAISettings,
     RedisSettings,
 )
+from factory_core.config.secrets import SecretsSettings
 from factory_core.config.service import ApiSettings, ObservabilitySettings
 
 _MIN_SECRET_LENGTH = 32
@@ -140,6 +141,7 @@ class Settings(BaseSettings):
 
     # Optional, and consumed by later phases. Present now so credentials have a redacted
     # home before the code that uses them exists. See config/integrations.py.
+    secrets: SecretsSettings = Field(default_factory=SecretsSettings)
     email: EmailSettings = Field(default_factory=EmailSettings)
     verification: VerificationSettings = Field(default_factory=VerificationSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
@@ -190,8 +192,16 @@ class Settings(BaseSettings):
 
         Booleans only — never the credentials themselves. Safe to log at startup and to
         surface on the readiness endpoint, which is unauthenticated.
+
+        The vault's key is ``vault`` rather than ``secrets`` on purpose: the redactor
+        blanks the value of any key whose name contains "secret", so calling it that would
+        report ``[REDACTED]`` here and leave an operator unable to tell whether the vault
+        is configured. Renaming the *report* is the right fix — weakening the redactor for
+        one known-safe key would risk masking a real leak under a key named the same way
+        somewhere else.
         """
         return {
+            "vault": self.secrets.is_configured,
             "email": self.email.is_configured,
             "redis": self.redis.is_configured,
             "openai": self.openai.is_configured,
@@ -209,6 +219,8 @@ class Settings(BaseSettings):
             self.security.jwt_secret_key.get_secret_value(),
         ]
         for optional in (
+            self.secrets.master_key,
+            self.secrets.previous_keys,
             self.redis.url,
             self.openai.api_key,
             self.langsmith.api_key,

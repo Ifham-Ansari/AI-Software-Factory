@@ -285,6 +285,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/configuration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this project still needs before it can be built
+         * @description Report every requirement and whether it is satisfied.
+         *
+         *     Satisfaction for a secret-backed requirement is derived from whether the secret
+         *     exists, so this cannot claim a credential is present when it is not.
+         */
+        get: operations["get_configuration_projects__project_id__configuration_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/configuration/requirements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record that this project needs a configuration entry
+         * @description Add a catalog requirement to this project.
+         *
+         *     Raises:
+         *         ValidationError: The key is not in the catalog. Rejected here rather than ignored
+         *             because a human typing a key deserves to be told; the intake agent in Phase 3
+         *             uses the service directly, which drops unknown keys instead.
+         */
+        post: operations["add_requirement_projects__project_id__configuration_requirements_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a workflow run
+         * @description Create a run to carry events and jobs.
+         *
+         *     Phase 3's graph will own run creation. It is exposed now because events and jobs
+         *     both hang off a run, and the realtime pipeline has to be demonstrable before any
+         *     agent exists to drive it.
+         */
+        post: operations["create_workflow_run_projects__project_id__runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/secrets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a project's secrets (metadata only)
+         * @description Return every secret's metadata.
+         *
+         *     Names, descriptions and timestamps. Never values — there is no endpoint that returns
+         *     one, and no response model with a field for one.
+         */
+        get: operations["list_secrets_projects__project_id__secrets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/secrets/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Describe one secret (metadata only)
+         * @description Return one secret's metadata.
+         *
+         *     Raises:
+         *         NotFoundError: No secret by that name in this project.
+         */
+        get: operations["describe_secret_projects__project_id__secrets__name__get"];
+        /**
+         * Store or replace a secret value
+         * @description Encrypt and store a value.
+         *
+         *     Idempotent by name: storing again replaces the value and bumps its version, so an
+         *     operator rotating a credential does not have to delete first.
+         *
+         *     Raises:
+         *         ValidationError: The path name and body name disagree. Guessing which one was
+         *             meant would silently write to the wrong key.
+         */
+        put: operations["store_secret_projects__project_id__secrets__name__put"];
+        post?: never;
+        /**
+         * Delete a secret
+         * @description Remove a secret.
+         *
+         *     Raises:
+         *         NotFoundError: No secret by that name, so nothing was deleted. Reported rather
+         *             than silently succeeding, because "delete succeeded" on a typo'd name would
+         *             leave an operator believing a credential was revoked when it was not.
+         */
+        delete: operations["delete_secret_projects__project_id__secrets__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ready": {
         parameters: {
             query?: never;
@@ -308,10 +446,113 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Replay a run's events from a sequence cursor
+         * @description Return the events a client has not seen.
+         *
+         *     This is what makes a dropped socket lossless: the client sends the last ``seq`` it
+         *     processed and receives exactly the gap, in order, once.
+         *
+         *     Raises:
+         *         NotFoundError: The run does not exist, or belongs to another user's project.
+         */
+        get: operations["replay_events_runs__run_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enqueue background work against a run
+         * @description Submit a job.
+         *
+         *     Enqueued in the request's own transaction, so the job and the state that justifies it
+         *     commit together — there is no window where a worker could claim a job referring to
+         *     something that was rolled back.
+         */
+        post: operations["enqueue_job_runs__run_id__jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/ws-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a single-use ticket for the event socket
+         * @description Issue a short-lived ticket authorising one socket connection.
+         *
+         *     A ticket rather than a cookie (CSRF-prone on WebSocket) or a query-string bearer
+         *     token (which lands in access logs). See ``ws/tickets.py``.
+         */
+        post: operations["create_ws_ticket_runs__run_id__ws_ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AddRequirementRequest
+         * @description Record that a project needs a catalog entry.
+         */
+        AddRequirementRequest: {
+            /** Key */
+            key: string;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+        };
+        /**
+         * ConfigurationResponse
+         * @description What a project still needs before it can be built.
+         */
+        ConfigurationResponse: {
+            /** Is Satisfied */
+            is_satisfied: boolean;
+            /**
+             * Missing
+             * @description Keys of required, unsatisfied entries. Empty means ready.
+             */
+            missing: string[];
+            /** Project Id */
+            project_id: string;
+            /** Requirements */
+            requirements: components["schemas"]["RequirementResponse"][];
+        };
         /**
          * CreateProjectRequest
          * @description Create a project.
@@ -345,6 +586,28 @@ export interface components {
             name: string;
             /** Status */
             status: string;
+        };
+        /**
+         * EnqueueJobRequest
+         * @description Submit background work.
+         *
+         *     Phase 2 accepts only ``noop``: the pipeline is real, the work is not. Restricting the
+         *     type at the boundary means the endpoint cannot be used to invoke handlers that later
+         *     phases register with different privileges.
+         */
+        EnqueueJobRequest: {
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+            /**
+             * Steps
+             * @default 3
+             */
+            steps: number;
+            /**
+             * Type
+             * @default noop
+             */
+            type: string;
         };
         /**
          * ErrorBody
@@ -414,6 +677,65 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorBody"];
         };
+        /**
+         * EventPageResponse
+         * @description A replay page.
+         *
+         *     ``next_seq`` is the cursor to send on the following request, and ``has_more`` says
+         *     whether one is needed. Returning both means the client never has to infer whether a
+         *     short page meant "caught up" or "hit the limit".
+         */
+        EventPageResponse: {
+            /** Has More */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["EventResponse"][];
+            /** Latest Seq */
+            latest_seq: number;
+            /** Next Seq */
+            next_seq: number;
+        };
+        /**
+         * EventResponse
+         * @description One event, as delivered over REST replay and over the socket.
+         *
+         *     The same shape on both paths on purpose: a client that can render a replayed event
+         *     can render a live one with no branching, which is what makes reconnection seamless.
+         */
+        EventResponse: {
+            /** Actor Id */
+            actor_id: string | null;
+            /** Actor Kind */
+            actor_kind: string;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Seq */
+            seq: number;
+            /** Type */
+            type: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -433,6 +755,38 @@ export interface components {
             /** Version */
             version: string;
         };
+        /**
+         * JobResponse
+         * @description An enqueued job.
+         */
+        JobResponse: {
+            /** Attempts */
+            attempts: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            status: components["schemas"]["JobStatus"];
+            /** Type */
+            type: string;
+        };
+        /**
+         * JobStatus
+         * @description Where a job is in its lifecycle.
+         *
+         *     ``FAILED`` is retryable — the job goes back to ``PENDING`` with backoff. ``DEAD`` is
+         *     terminal: attempts are exhausted and a human needs to look. Keeping them distinct is
+         *     what makes the dead-letter query "everything that gave up" rather than "everything
+         *     that ever failed".
+         * @enum {string}
+         */
+        JobStatus: "pending" | "running" | "completed" | "failed" | "dead";
         /**
          * MessageResponse
          * @description A bare acknowledgement, for endpoints with nothing else to return.
@@ -572,6 +926,26 @@ export interface components {
             password: string;
         };
         /**
+         * RequirementResponse
+         * @description One configuration requirement and whether it is met.
+         */
+        RequirementResponse: {
+            /** Category */
+            category: string;
+            /** Description */
+            description: string;
+            /** Help Url */
+            help_url?: string | null;
+            /** Key */
+            key: string;
+            /** Required */
+            required: boolean;
+            /** Satisfied */
+            satisfied: boolean;
+            /** Secret Backed */
+            secret_backed: boolean;
+        };
+        /**
          * ResendVerificationRequest
          * @description Request a fresh verification code.
          */
@@ -581,6 +955,72 @@ export interface components {
              * Format: email
              */
             email: string;
+        };
+        /**
+         * RunResponse
+         * @description A workflow run.
+         */
+        RunResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Seq */
+            last_seq: number;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * SecretListResponse
+         * @description Every secret a project holds.
+         */
+        SecretListResponse: {
+            /** Items */
+            items: components["schemas"]["SecretResponse"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * SecretResponse
+         * @description A secret's metadata. Deliberately has no value field.
+         */
+        SecretResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description: string;
+            /** Is Set */
+            is_set: boolean;
+            /** Last Accessed At */
+            last_accessed_at: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Reference
+             * @description The secret:// reference handed to agents. Safe to display.
+             */
+            reference: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
         };
         /**
          * SessionResponse
@@ -635,6 +1075,32 @@ export interface components {
          * @enum {string}
          */
         SortDirection: "asc" | "desc";
+        /**
+         * StoreSecretRequest
+         * @description Write a secret value. The only place a plaintext value enters the system.
+         * @example {
+         *       "description": "Push access for generated repositories.",
+         *       "name": "GITHUB_TOKEN",
+         *       "value": "ghp_example_token_value"
+         *     }
+         */
+        StoreSecretRequest: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Name
+             * @description Environment-variable shaped: uppercase, digits, underscores.
+             */
+            name: string;
+            /**
+             * Value
+             * @description The credential. Encrypted immediately and never returned.
+             */
+            value: string;
+        };
         /**
          * UpdateProjectRequest
          * @description Partially update a project.
@@ -734,6 +1200,21 @@ export interface components {
              * Format: email
              */
             email: string;
+        };
+        /**
+         * WebSocketTicketResponse
+         * @description A single-use ticket for opening a run's event socket.
+         */
+        WebSocketTicketResponse: {
+            /**
+             * Expires In
+             * @description Seconds until the ticket can no longer be redeemed.
+             */
+            expires_in: number;
+            /** Socket Path */
+            socket_path: string;
+            /** Ticket */
+            ticket: string;
         };
     };
     responses: never;
@@ -1607,6 +2088,412 @@ export interface operations {
             };
         };
     };
+    get_configuration_projects__project_id__configuration_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    add_requirement_projects__project_id__configuration_requirements_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddRequirementRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_workflow_run_projects__project_id__runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_secrets_projects__project_id__secrets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    describe_secret_projects__project_id__secrets__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    store_secret_projects__project_id__secrets__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoreSecretRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_secret_projects__project_id__secrets__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     ready_ready_get: {
         parameters: {
             query?: never;
@@ -1632,6 +2519,161 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadinessResponse"];
+                };
+            };
+        };
+    };
+    replay_events_runs__run_id__events_get: {
+        parameters: {
+            query?: {
+                /** @description Return events with seq greater than this. */
+                after_seq?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventPageResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_job_runs__run_id__jobs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnqueueJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_ws_ticket_runs__run_id__ws_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSocketTicketResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

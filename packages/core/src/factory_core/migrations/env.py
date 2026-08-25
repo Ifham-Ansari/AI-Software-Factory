@@ -21,14 +21,16 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+# Importing the models module registers every table on Base.metadata. Without it,
+# autogenerate would see an empty schema and cheerfully write a migration dropping
+# every table.
+import factory_core.persistence.models
+import factory_core.persistence.models_runtime
 from factory_core.config import DatabaseSettings
 from factory_core.persistence.base import Base
 from factory_core.runtime import configure_event_loop, event_loop_factory
 
-# Importing the models module registers every table on Base.metadata. Without it,
-# autogenerate would see an empty schema and cheerfully write a migration dropping
-# every table.
-import factory_core.persistence.models  # noqa: F401  isort:skip
+import factory_core.persistence.models_secrets  # noqa: F401  isort:skip
 
 config = context.config
 

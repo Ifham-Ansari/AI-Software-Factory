@@ -1,6 +1,6 @@
 # CLAUDE.md — Read this before modifying anything
 
-> **Project status: PHASE 1 IMPLEMENTED. Phase 2 has not started.**
+> **Project status: PHASES 1 AND 2 IMPLEMENTED. Phase 3 has not started.**
 >
 > **File naming note:** the planning brief called for `claude.md`. This file is named `CLAUDE.md`
 > because that is the name Claude Code loads automatically on every platform, including
@@ -177,26 +177,47 @@ diffable, reviewable, offline-capable, and recorded per call.
 
 | | |
 |---|---|
-| Phase | **1 complete** — Platform Foundation & Contracts |
-| Next | **Phase 2 — Secure Configuration, Secrets & Realtime Backbone** ([plan.md](plan.md) §5) |
-| Features | **18 VERIFIED** of 127 ([features.md](features.md)) |
-| Tests | 403 backend (0 skipped, 91% coverage) · 40 frontend · 12 e2e — all green |
+| Phase | **2 complete** — Secure Configuration, Secrets & Realtime Backbone |
+| Next | **Phase 3 — Agent Runtime & Intake** ([plan.md](plan.md) §6) |
+| Features | **34 VERIFIED** of 127 ([features.md](features.md)) |
+| Tests | 627 backend (90% coverage) · 55 frontend · 16 e2e, run twice — all green |
 
-**What exists.** A working platform: registration with email OTP verification, sign-in,
-rotating refresh tokens with theft detection, project CRUD scoped per owner, an audit
-trail, structured logging with secret redaction, health and readiness endpoints, generated
-TypeScript contracts, and a Next.js control centre. No AI yet — that starts in Phase 3.
+**What exists.** Everything from Phase 1 — registration with email OTP verification,
+sign-in, rotating refresh tokens with theft detection, project CRUD scoped per owner, an
+audit trail, structured logging with secret redaction, health and readiness endpoints,
+generated TypeScript contracts, a Next.js control centre — plus the Phase 2 backbone:
+
+* **A secret vault.** Envelope encryption (KEK → per-project DEK → AES-256-GCM), write-only
+  over the API, `secret://` references resolved only at three allowlisted sinks, every
+  resolution audited. Online key rotation, with a runbook and a script.
+* **Realtime.** Durable per-run events with gapless sequence numbers, persist-then-publish
+  through Redis, a ticket-authenticated WebSocket, and a browser client that replays the
+  gap on reconnect.
+* **A durable job queue.** Postgres `SKIP LOCKED` with leases, backoff and a dead-letter
+  state, and a worker that drains on SIGTERM. Ships with a `noop` handler that proves the
+  whole pipeline end to end.
+
+Still no AI — that starts in Phase 3. Everything above exists so the agent runtime has
+somewhere safe to put credentials and something durable to run on.
 
 **Verified against real infrastructure.** The integration suite runs against a real
 PostgreSQL and the e2e suite against the full stack. Nothing in Phase 1 is unproven.
 
-**Before starting Phase 2**, run the full suite and confirm it is green. If the integration
+**Before starting Phase 3**, run the full suite and confirm it is green. If the integration
 tests skip, `TEST_DATABASE_URL` is unset — say so rather than assuming they pass.
 
-**Credentials for later phases are already configured.** Redis, OpenAI and LangSmith
-settings exist in `factory_core.config.integrations` and are registered with the
-redactor at startup. Only the *configuration* is built; the clients that consume it are
-Phase 2 and Phase 3 work. Do not wire them up early.
+**Credentials for later phases are already configured.** OpenAI and LangSmith settings
+exist in `factory_core.config.integrations` and are registered with the redactor at
+startup. Only the *configuration* is built; the clients that consume them are Phase 3
+work. Do not wire them up early. Redis is now consumed — see
+`factory_core.infrastructure.redis`.
+
+**`SECRETS__MASTER_KEY` is required for the vault.** Without it the platform starts and
+everything except the vault works; storing a secret returns 503 rather than falling back
+to storing it in the clear. Generate one with
+`uv run python scripts/generate_master_key.py`, and read
+[docs/runbooks/key-management.md](docs/runbooks/key-management.md) before using it for
+anything real — losing the key makes every stored secret unrecoverable.
 
 ### Event loops and psycopg
 
@@ -258,3 +279,5 @@ need. Mark the feature `BLOCKED`. An accurate blocker beats an optimistic guess.
 | 2026-08-23 | Created alongside the planning documents. No implementation yet. |
 | 2026-08-23 | Phase 1 implemented. Status updated; event-loop constraint recorded. |
 | 2026-08-24 | Email OTP verification added to registration; sign-in refuses unverified accounts. Password minimum lowered to 8 characters; auth UI polished (password show/hide, code entry, visual pass). Test counts updated. |
+| 2026-08-24 | Phase 2 implemented: secret vault with envelope encryption, config requirements, Redis primitives, durable events with replay, ticket-authenticated WebSocket, Postgres job queue, worker claim loop, frontend realtime client. |
+| 2026-08-25 | Phase 2 gap closed and a defect it exposed fixed. Redis pub/sub subscribed with a blocking `listen()` while the connection carried a 5s `socket_timeout`, so a quiet channel ended the subscription permanently — live fan-out died on every socket shortly after connecting, invisibly, because clients kept recovering by replay. Replaced with a bounded `get_message` loop. Two-replica fan-out is now tested against a real Redis (`TEST_REDIS_URL`), and the e2e suite runs as a matrix over fan-out enabled and unavailable. |

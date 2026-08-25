@@ -566,3 +566,137 @@ h3 {
   justify-content: center;
   gap: var(--space-4);
 }
+
+/* ---------- Activity feed and connection status (Phase 2) ---------- */
+.activity-feed {
+  margin-top: var(--space-6);
+}
+.activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.activity-header h2 {
+  margin: 0;
+}
+.activity-actions {
+  margin-bottom: var(--space-4);
+}
+.activity-empty {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+  font-size: 0.875rem;
+}
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+  max-height: 22rem;
+  overflow-y: auto;
+}
+.activity-row {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(6rem, auto) 1fr auto;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 0.8125rem;
+}
+.activity-seq {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  text-align: right;
+}
+.activity-type {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+.activity-message {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.activity-time {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.connection-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+.connection-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+.connection-live {
+  color: var(--success);
+}
+.connection-pending {
+  color: var(--accent);
+}
+.connection-offline {
+  color: var(--danger);
+}
+.connection-idle {
+  color: var(--text-muted);
+}
+/* The live dot pulses; reduced-motion users get a static one via the global rule. */
+.connection-live .connection-dot {
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---------- Configuration requirements ---------- */
+.config-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.config-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) 5rem 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: 0.875rem;
+}
+.config-key {
+  font-family: var(--font-mono);
+}
+.config-state {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.config-set {
+  color: var(--success);
+}
+.config-missing {
+  color: var(--danger);
+}
+.config-description {
+  font-size: 0.8125rem;
+}
+.config-ready {
+  color: var(--success);
+  font-size: 0.875rem;
+  margin: 0;
+}

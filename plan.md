@@ -253,6 +253,73 @@ multiple replicas → test with two API processes in CI.
 
 **Rollback.** Feature-flag the WebSocket surface; the platform remains fully usable over REST.
 
+### 5.1 Implementation notes (recorded 2026-08-24)
+
+**Delivered as planned**, with three decisions worth recording because a later reader will
+otherwise wonder why the code differs from the sub-phase list.
+
+**The WebSocket is the one thing the browser calls directly.** Every REST call is proxied
+through a Next.js route handler so the access token stays in an httpOnly cookie the
+browser cannot read. A WebSocket cannot be proxied that way — Next.js route handlers do
+not support the upgrade — so the browser connects to FastAPI directly. That is precisely
+what the single-use ticket is for: the socket URL is returned by an *authenticated* REST
+call rather than compiled into the public bundle, and knowing the URL grants nothing
+without a ticket that is valid for 30 seconds and one connection.
+
+**The rate limiter fails open; the lock fails closed.** Opposite directions, deliberately.
+A limiter that failed closed would turn a Redis outage into a total platform outage,
+whereas the worst case of failing open is some abuse going uncounted for the duration. A
+lock that failed open would allow two concurrent deployments, which is an incident. Both
+directions have their own failure test.
+
+**Satisfaction of a configuration requirement is derived, never stored.** A secret-backed
+requirement is satisfied exactly when its secret exists. Storing a flag alongside would
+create a second truth that drifts the moment somebody deletes a secret — and the flag is
+the one the UI would believe.
+
+**Two-replica fan-out, and the bug that closing the gap found (2026-08-25).** The gap was
+closed by testing two independent `ConnectionManager` + `EventBus` + `run_fanout` sets against
+a real Redis. That is faithful rather than a shortcut: those three objects are a replica's
+entire share of live delivery, so two of them reproduce the cluster boundary — and unlike two
+uvicorn processes they run on every commit.
+
+Writing it exposed a defect that had been invisible. `EventBus` subscribed with `listen()`,
+an unbounded blocking read, while the connection carried the default `socket_timeout` of five
+seconds. A channel with nothing published therefore raised `TimeoutError` after five seconds,
+`run_fanout` caught it, logged `ws.fanout_failed`, and returned. Since runs are quiet most of
+the time, **live delivery died on essentially every socket shortly after it connected** — and
+silently, because the socket stayed open and the client kept recovering by replay. The
+symptom was latency, which is exactly what an absent Redis is supposed to look like.
+
+Two things had hidden it. Redis pub/sub had no test at all — `FakeRedis` does not implement
+`pubsub()`, so nothing exercised a real subscription — and the e2e job ran with `REDIS_URL: ""`,
+so `run_fanout` returned immediately and the code never executed. The fix replaces `listen()`
+with a bounded `get_message` loop that treats a timeout as "nothing published yet". The
+regression test is `test_a_quiet_subscription_survives_the_socket_timeout`, and the e2e suite
+now runs as a matrix over both fan-out states so the enabled path is covered end to end.
+
+The bounded loop then needed one thing the blocking one had got for free. `get_message` also
+returns redis-py's health-check `pong` frames, whose `data` is a string, and
+`ignore_subscribe_messages` does not filter them — so a payload check asking only "is this a
+string?" would have forwarded a keepalive to every browser watching the run, roughly twice a
+minute. The explicit frame-type check is what prevents that, and
+`test_a_health_check_pong_is_not_an_event` pins it down against a stub, where a pong can be
+produced on demand.
+
+**The lesson worth keeping:** a component allowed to degrade silently needs a test that
+distinguishes degraded from broken, because in production those two look identical.
+
+**Known limit: concurrent sockets per replica are bounded by the Redis pool.** `run_fanout`
+is created per socket, and each subscription takes a dedicated connection from a pool whose
+default `max_connections` is 10 (`REDIS__MAX_CONNECTIONS`). Beyond that, redis-py raises
+`ConnectionError("Too many connections")` rather than blocking; `run_fanout` catches it,
+logs `ws.fanout_failed`, and that socket falls back to the client's five-second poll. So the
+failure mode is added latency for the excess viewers, not a broken or hanging connection —
+which is only true because the poll exists. Sharing one subscription per run across the
+sockets watching it would lift the limit and is the obvious change if it ever binds; it is
+not made now because Phase 2 has no concurrency requirement that needs it, and refcounted
+subscriptions are a real piece of state to get wrong.
+
 ---
 
 ## 6. Phase 3 — Agent Runtime & Intake
@@ -659,8 +726,8 @@ Full records land in `docs/adr/` during implementation. Summary of what is alrea
 
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
-| 1 — Platform Foundation | **COMPLETE** | 2026-08-23 | 2026-08-23 | 355 backend (93% cov) + 32 frontend + 10 e2e, all passing against real PostgreSQL. |
-| 2 — Secrets & Realtime | NOT STARTED | — | — | |
+| 1 — Platform Foundation | **COMPLETE** | 2026-08-23 | 2026-08-24 | Email OTP verification added post-hoc; see §4.1. |
+| 2 — Secrets & Realtime | **COMPLETE** | 2026-08-24 | 2026-08-25 | 627 backend (90% cov) + 55 frontend + 16 e2e run over both fan-out states. Two-replica fan-out now covered; see §5.1. |
 | 3 — Agent Runtime & Intake | NOT STARTED | — | — | |
 | 4 — Hierarchical Supervision | NOT STARTED | — | — | |
 | 5 — Workspace & Code Gen | NOT STARTED | — | — | |

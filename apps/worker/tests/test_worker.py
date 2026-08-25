@@ -1,7 +1,11 @@
 """Worker process lifecycle.
 
-Phase 1 gives the worker no work to do — the durable queue is Phase 2 — so what matters
-here is that it starts, refuses to start without a database, and stops cleanly.
+Start-up, refusal to start without a database, and clean shutdown. What the worker
+actually *does* with a claimed job is covered in ``test_processor.py``.
+
+``test_stops_when_asked`` is the load-bearing one: the settings here point at a database
+that may not exist, so a stop request must not have to wait for a claim's connect timeout.
+That is why the claim races the stop event rather than being awaited outright.
 """
 
 from __future__ import annotations

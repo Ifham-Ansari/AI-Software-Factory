@@ -13,15 +13,18 @@ from factory_core.testing.identity import (
     FakeUserRepository,
 )
 from factory_core.testing.projects import FakeProjectRepository, FakeProjectStore
+from factory_core.testing.redis import BrokenRedis, FakeRedis
 from factory_core.testing.verification import (
     FakeVerificationRepository,
     RecordingEmailSender,
 )
 
 __all__ = [
+    "BrokenRedis",
     "FakeAuditRepository",
     "FakeProjectRepository",
     "FakeProjectStore",
+    "FakeRedis",
     "FakeRefreshTokenRepository",
     "FakeUserRepository",
     "FakeVerificationRepository",

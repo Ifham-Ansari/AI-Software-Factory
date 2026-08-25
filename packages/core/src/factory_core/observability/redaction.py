@@ -9,6 +9,9 @@ Three independent strategies, because any one of them alone has a blind spot:
 3. **Shape patterns.** Recognisable credential formats (JWTs, bearer headers, Postgres
    URLs with a password, common provider key prefixes) are matched anywhere in a string.
    Catches secrets that arrive from outside, such as in a third-party error message.
+4. **High entropy.** A long token whose character distribution looks random is redacted
+   even when it matches no known pattern. This is what catches a credential from a
+   provider we have never integrated with, which by definition has no pattern here yet.
 
 The redactor is deliberately biased toward over-redaction. A log line that is harder to
 read costs a few seconds; a leaked credential costs an incident.
@@ -18,6 +21,8 @@ from __future__ import annotations
 
 import re
 from typing import Any, Final
+
+from factory_core.observability.entropy import looks_like_credential, token_pattern
 
 REDACTED: Final = "[REDACTED]"
 
@@ -120,13 +125,13 @@ class SecretRedactor:
         return any(part in lowered for part in _SENSITIVE_KEY_PARTS)
 
     def redact_text(self, text: str) -> str:
-        """Redact known values and recognisable credential shapes from a string."""
+        """Redact known values, credential shapes, and high-entropy tokens."""
         for known in self._known:
             if known in text:
                 text = text.replace(known, REDACTED)
         for pattern in _PATTERNS:
             text = pattern.sub(_replace_match, text)
-        return text
+        return token_pattern().sub(_replace_high_entropy, text)
 
     def redact(self, value: Any, *, key: str | None = None) -> Any:
         """Recursively redact a value of any shape.
@@ -162,6 +167,12 @@ def url_password(url: str) -> str | None:
     if ":" not in credentials:
         return None
     return credentials.split(":", 1)[1] or None
+
+
+def _replace_high_entropy(match: re.Match[str]) -> str:
+    """Redact a token only if it scores as credential-like, else leave it alone."""
+    token = match.group(0)
+    return REDACTED if looks_like_credential(token) else token
 
 
 def _replace_match(match: re.Match[str]) -> str:

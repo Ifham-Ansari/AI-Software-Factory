@@ -16,11 +16,15 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from factory_api.ws.manager import ConnectionManager
+from factory_api.ws.tickets import TicketRegistry
 from factory_core.application.health import DependencyProbe, HealthService
 from factory_core.config import Settings
 from factory_core.infrastructure.email import EmailSender, build_email_sender
+from factory_core.infrastructure.redis import EventBus, RedisGateway, create_redis
 from factory_core.persistence import SessionFactory, create_engine, create_session_factory
 from factory_core.security import AccessTokenIssuer, PasswordHasher
+from factory_core.security.keyring import KeyRing, build_keyring
 
 
 @dataclass(slots=True)
@@ -33,6 +37,13 @@ class AppState:
     hasher: PasswordHasher
     issuer: AccessTokenIssuer
     email_sender: EmailSender
+    redis: RedisGateway
+    event_bus: EventBus
+    connections: ConnectionManager
+    tickets: TicketRegistry
+    #: ``None`` when no master key is configured. The vault refuses to operate
+    #: rather than falling back to storing values in the clear.
+    keyring: KeyRing | None
     health: HealthService
 
 
@@ -45,8 +56,14 @@ def build_state(settings: Settings) -> AppState:
     engine = create_engine(settings.database, application_name="factory-api")
     session_factory = create_session_factory(engine)
 
+    gateway = RedisGateway(create_redis(settings.redis))
+
     health = HealthService(timeout_seconds=settings.api.health_timeout_seconds)
     health.register("database", _database_probe(session_factory))
+    if gateway.is_available:
+        # Registered only when configured: an unconfigured Redis is a supported
+        # deployment, and reporting it as an unhealthy dependency would be wrong.
+        health.register("redis", _redis_probe(gateway))
 
     return AppState(
         settings=settings,
@@ -65,8 +82,28 @@ def build_state(settings: Settings) -> AppState:
             ttl_seconds=settings.security.access_token_ttl_seconds,
         ),
         email_sender=build_email_sender(settings.email),
+        redis=gateway,
+        event_bus=EventBus(gateway),
+        connections=ConnectionManager(),
+        tickets=TicketRegistry(),
+        keyring=build_keyring(settings.secrets) if settings.secrets.is_configured else None,
         health=health,
     )
+
+
+def _redis_probe(gateway: RedisGateway) -> DependencyProbe:
+    """Build a probe that verifies Redis answers.
+
+    Raises rather than returning a boolean because ``HealthService`` treats an exception
+    as the failure signal, matching how the database probe reports.
+    """
+
+    async def probe() -> None:
+        if not await gateway.ping():
+            msg = "Redis did not respond to PING"
+            raise ConnectionError(msg)
+
+    return probe
 
 
 def _database_probe(session_factory: SessionFactory) -> DependencyProbe:

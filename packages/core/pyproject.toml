@@ -13,6 +13,12 @@ dependencies = [
     "pyjwt>=2.10,<3",
     "structlog>=24.4,<26",
     "email-validator>=2.2,<3",
+    # AES-256-GCM for envelope encryption (F-201). Authenticated encryption is the one
+    # thing never to hand-roll; PyCA's binding to OpenSSL is the reference implementation.
+    "cryptography>=44,<47",
+    # Events fan-out, rate limiting, idempotency and distributed locks (F-207). The
+    # official client; its asyncio interface is first-party, not a separate package.
+    "redis>=5.2,<7",
 ]
 
 [build-system]

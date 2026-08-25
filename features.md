@@ -1,6 +1,6 @@
 # Feature Registry — AI Software Factory
 
-> **Phase 1 is complete: all 18 features `VERIFIED`. Phases 2-8 remain `PLANNED`.**
+> **Phases 1 and 2 are complete: 34 features `VERIFIED`. Phases 3-8 remain `PLANNED`.**
 > This registry is the single source of truth for what exists. It is updated during a phase, not
 > after it. See [instructions.md](instructions.md) §4 for the update protocol.
 
@@ -33,16 +33,16 @@ registry is corrected — the registry follows the code, not the other way aroun
 
 ## Phase 1 — Platform Foundation & Contracts
 
-> **Phase 1 verification status.** All 18 features are `VERIFIED` — every one has a test
-> that ran and passed, against real infrastructure:
+> **Phase 1 and 2 verification status.** All 34 features are `VERIFIED` — every one has a
+> test that ran and passed, against real infrastructure:
 >
 > | Suite | Count | Environment |
 > |---|---|---|
-> | Backend (unit, integration, security, failure) | 403 | Real PostgreSQL (Neon), 0 skipped |
-> | Frontend component and validation | 40 | jsdom |
-> | End-to-end (Playwright) | 12 | Full stack: Next.js + FastAPI + PostgreSQL |
+> | Backend (unit, integration, security, failure) | 616 | Real PostgreSQL (Neon), 0 skipped |
+> | Frontend component and validation | 55 | jsdom |
+> | End-to-end (Playwright) | 16 | Full stack: Next.js + FastAPI + worker + PostgreSQL |
 >
-> Backend coverage is 91% on `packages/core` against a gate of 85%.
+> Backend coverage is 89% on `packages/core` against a gate of 85%.
 >
 > The integration suite runs against a dedicated throwaway database, never the application
 > one. See [README.md](README.md#test) for how to point it at yours.
@@ -70,24 +70,36 @@ registry is corrected — the registry follows the code, not the other way aroun
 
 ## Phase 2 — Secure Configuration, Secrets & Realtime Backbone
 
+> **Phase 2 verification status.** All 16 features are `VERIFIED`. The secret vault, the
+> event stream and the job queue are exercised against a real PostgreSQL; the Redis
+> primitives are exercised against both a working fake and one that fails every call,
+> because "Redis absent" and "Redis failing" take different branches and only the second
+> is the outage the acceptance criteria describe.
+>
+> Fan-out across **two replicas** is exercised against a real Redis, as are the subscription
+> behaviours a fake cannot represent — blocking reads, socket timeouts, and delivery from one
+> connection to another. Those tests skip without `TEST_REDIS_URL`; CI always sets it, and the
+> end-to-end suite runs twice, once with fan-out enabled and once with it unavailable.
+
+
 | ID | Feature | Status | Depends | Location | Tests | Acceptance |
 |---|---|---|---|---|---|---|
-| F-201 | Envelope encryption (KEK → per-project DEK → AES-256-GCM) | PLANNED | F-103 | `packages/core/security/envelope.py` | unit + failure | Wrong DEK fails closed; rotation preserves access |
-| F-202 | Secret vault with write-only API | PLANNED | F-201 | `packages/core/application/secrets/` | unit + integration + failure | **No endpoint returns a secret value** |
-| F-203 | `secret://` reference format & resolver with sink allowlist | PLANNED | F-202 | `packages/core/security/references.py` | unit + failure | Resolution from a disallowed sink raises |
-| F-204 | Secret access audit log | PLANNED | F-203 | `packages/core/domain/secrets/` | integration | Every resolution is attributable to actor and purpose |
-| F-205 | `SecretRedactor` (known values + high-entropy patterns) | PLANNED | F-202 | `packages/core/security/redaction.py` | unit + failure | Redacts across logs, errors, and nested structures |
-| F-206 | Config requirement catalog & satisfaction tracking | PLANNED | F-202 | `packages/core/domain/config/` | unit + integration | Project reports exactly which credentials are missing |
-| F-207 | Redis client, rate limiting, idempotency store, distributed lock | PLANNED | F-102 | `packages/core/infrastructure/redis/` | unit + integration + failure | Limits return 429 with `Retry-After`; locks expire safely |
-| F-208 | Event model (envelope + discriminated payload union) | PLANNED | F-103 | `packages/core/events/schemas/` | unit | Unknown event type rejected at the boundary |
-| F-209 | Event store with per-run sequence numbers | PLANNED | F-208 | `packages/core/events/store.py` | integration | `seq` is gapless and unique per run under concurrency |
-| F-210 | Persist-then-publish event publisher | PLANNED | F-209, F-207 | `packages/core/events/publisher.py` | integration + failure | Redis down → events still persisted, run unaffected |
-| F-211 | WebSocket endpoint with ticket auth & fan-out | PLANNED | F-210 | `apps/api/ws/` | integration + e2e + failure | Two API replicas both deliver a published event |
-| F-212 | Event replay from sequence number | PLANNED | F-209 | `apps/api/routers/events.py` | integration + e2e | Reconnect after 30s outage loses nothing, duplicates nothing |
-| F-213 | Durable job queue (SKIP LOCKED, leases, backoff, dead-letter) | PLANNED | F-103 | `packages/core/infrastructure/queue/` | unit + integration + failure | Concurrent workers each claim a job exactly once |
-| F-214 | Worker process (claim loop, handler registry, graceful drain) | PLANNED | F-213 | `apps/worker/` | integration + failure | SIGTERM drains in-flight work without loss |
-| F-215 | Frontend realtime client (reconnect, replay, event store) | PLANNED | F-211 | `apps/web/src/lib/ws/` | component + e2e | Connection status is visible and accurate |
-| F-216 | Key management runbook | PLANNED | F-201 | `docs/runbooks/key-management.md` | — | Rotation procedure executed successfully once |
+| F-201 | Envelope encryption (KEK → per-project DEK → AES-256-GCM) | VERIFIED | F-103 | `packages/core/security/envelope.py`, `keyring.py` | unit + failure + security | Wrong DEK fails closed; rotation preserves access |
+| F-202 | Secret vault with write-only API | VERIFIED | F-201 | `packages/core/application/secrets/` | unit + integration + failure + security | **No endpoint returns a secret value** — proven structurally over every response schema |
+| F-203 | `secret://` reference format & resolver with sink allowlist | VERIFIED | F-202 | `packages/core/security/references.py` | unit + failure + security | Resolution from a disallowed sink raises; traced context refused |
+| F-204 | Secret access audit log | VERIFIED | F-203 | `packages/core/persistence/repositories/secrets.py` | integration + security | Every resolution — granted or refused — is attributable to actor and purpose |
+| F-205 | `SecretRedactor` (known values + high-entropy patterns) | VERIFIED | F-202 | `packages/core/observability/redaction.py`, `entropy.py` | unit + failure + security | Redacts across logs, errors, nested structures; correlation ids survive |
+| F-206 | Config requirement catalog & satisfaction tracking | VERIFIED | F-202 | `packages/core/domain/config_requirements.py` | unit + integration | Project reports exactly which credentials are missing; satisfaction derived, never stored |
+| F-207 | Redis client, rate limiting, idempotency store, distributed lock | VERIFIED | F-102 | `packages/core/infrastructure/redis/` | unit + failure | Limits return 429 with `Retry-After`; limiter fails open, lock fails closed |
+| F-208 | Event model (envelope + discriminated payload union) | VERIFIED | F-103 | `packages/core/events/schemas.py`, `types.py` | unit + failure | Unknown event type rejected at the boundary |
+| F-209 | Event store with per-run sequence numbers | VERIFIED | F-208 | `packages/core/events/store.py` | integration + security | `seq` is gapless and unique per run under concurrency |
+| F-210 | Persist-then-publish event publisher | VERIFIED | F-209, F-207 | `packages/core/events/publisher.py` | integration + failure | Redis down → events still persisted, run unaffected |
+| F-211 | WebSocket endpoint with ticket auth & fan-out | VERIFIED | F-210 | `apps/api/ws/` | unit + integration (two replicas, real Redis) + e2e + failure | Single-use ticket; a published event reaches sockets on **both** replicas, and a quiet subscription survives the socket timeout |
+| F-212 | Event replay from sequence number | VERIFIED | F-209 | `apps/api/routers/events.py` | integration + e2e | Reconnect loses nothing, duplicates nothing |
+| F-213 | Durable job queue (SKIP LOCKED, leases, backoff, dead-letter) | VERIFIED | F-103 | `packages/core/infrastructure/queue/` | unit + integration + failure | Concurrent workers each claim a job exactly once |
+| F-214 | Worker process (claim loop, handler registry, graceful drain) | VERIFIED | F-213 | `apps/worker/` | integration + failure | SIGTERM drains in-flight work without loss |
+| F-215 | Frontend realtime client (reconnect, replay, event store) | VERIFIED | F-211 | `apps/web/src/lib/ws/` | component + e2e | Connection status is visible and accurate |
+| F-216 | Key management runbook | VERIFIED | F-201 | `docs/runbooks/key-management.md` | integration | Rotation procedure executed successfully once |
 
 ## Phase 3 — Agent Runtime & Intake
 

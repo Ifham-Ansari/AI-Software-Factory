@@ -24,6 +24,7 @@ from factory_core.config.integrations import (
     OpenAISettings,
     RedisSettings,
 )
+from factory_core.config.secrets import SecretsSettings
 from factory_core.config.service import ApiSettings, ObservabilitySettings
 from factory_core.config.settings import DatabaseSettings, SecuritySettings, Settings
 from factory_core.errors import ConfigurationError
@@ -98,6 +99,7 @@ def load_settings() -> Settings:
     api = _build(ApiSettings, "API__", problems)
     # Optional sections. Built here rather than left to default_factory so a malformed
     # value reports its own variable name instead of surfacing as an opaque root error.
+    secrets = _build(SecretsSettings, "SECRETS__", problems)
     email = _build(EmailSettings, "EMAIL__", problems)
     verification = _build(VerificationSettings, "VERIFICATION__", problems)
     redis = _build(RedisSettings, "REDIS__", problems)
@@ -111,6 +113,7 @@ def load_settings() -> Settings:
     assert security is not None
     assert observability is not None
     assert api is not None
+    assert secrets is not None
     assert email is not None
     assert verification is not None
     assert redis is not None
@@ -123,6 +126,7 @@ def load_settings() -> Settings:
             security=security,
             observability=observability,
             api=api,
+            secrets=secrets,
             email=email,
             verification=verification,
             redis=redis,

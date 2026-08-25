@@ -1,6 +1,29 @@
-"""Password hashing, access tokens and refresh-token rotation."""
+"""Password hashing, tokens, and envelope encryption for the secret vault."""
 
+from factory_core.security.envelope import (
+    DecryptionError,
+    SealedBytes,
+    generate_key,
+    seal,
+    seal_text,
+    unseal,
+    unseal_text,
+    value_context,
+)
+from factory_core.security.keyring import KeyRing, MasterKey, build_keyring
 from factory_core.security.passwords import PasswordHasher
+from factory_core.security.references import (
+    InvalidSecretReferenceError,
+    SecretReference,
+    SecretSink,
+    SinkNotAllowedError,
+    TracedContextError,
+    ensure_resolvable,
+    in_traced_context,
+    is_secret_reference,
+    is_valid_secret_name,
+    traced_context,
+)
 from factory_core.security.refresh import (
     IssuedRefreshToken,
     RefreshTokenRecord,
@@ -23,18 +46,39 @@ from factory_core.security.verification import (
 __all__ = [
     "AccessTokenClaims",
     "AccessTokenIssuer",
+    "DecryptionError",
+    "InvalidSecretReferenceError",
     "IssuedRefreshToken",
     "IssuedVerificationCode",
+    "KeyRing",
+    "MasterKey",
     "PasswordHasher",
     "RefreshTokenRecord",
     "RefreshTokenStatus",
+    "SealedBytes",
+    "SecretReference",
+    "SecretSink",
+    "SinkNotAllowedError",
+    "TracedContextError",
     "VerificationCode",
     "VerificationStatus",
+    "build_keyring",
     "codes_match",
+    "ensure_resolvable",
     "generate_code",
+    "generate_key",
     "generate_refresh_token",
     "hash_code",
     "hash_refresh_token",
+    "in_traced_context",
+    "is_secret_reference",
+    "is_valid_secret_name",
     "issue_verification_code",
+    "seal",
+    "seal_text",
     "tokens_match",
+    "traced_context",
+    "unseal",
+    "unseal_text",
+    "value_context",
 ]

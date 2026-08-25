@@ -47,6 +47,11 @@ EXCEPTIONS: dict[str, str] = {
         "A migration is one atomic schema change. Splitting it would create revisions "
         "that cannot be applied independently."
     ),
+    "packages/core/src/factory_core/migrations/versions/0003_phase_2_secrets_events_jobs.py": (
+        "Same reason as 0001: the six Phase 2 tables reference each other, so splitting "
+        "them into separate revisions would create intermediate states with dangling "
+        "foreign keys."
+    ),
 }
 
 

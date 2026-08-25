@@ -66,10 +66,22 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # Redis pub/sub cannot be faked usefully: the fake would forward messages to itself
+      # and prove nothing about connections, blocking reads or socket timeouts — which is
+      # where this path's bugs have actually been.
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       # Set so the integration suite runs rather than skipping. Locally it is usually
       # unset, and those tests skip with a message explaining what they cover.
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/factory_test
+      TEST_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -163,9 +175,26 @@ jobs:
   # End-to-end: the only tests that prove the whole stack works together.
   # ---------------------------------------------------------------------------
   e2e:
-    name: End-to-end
+    # Run the whole journey twice: once with fan-out available, once without.
+    #
+    # "Without" is not a fallback configuration, it is a supported deployment, and it is
+    # the one that proves events stay durable and the client recovers them by replaying.
+    # "With" is what production actually runs, and it is the only place the WebSocket
+    # endpoint's fan-out wiring is exercised end to end — with no Redis, `run_fanout`
+    # returns immediately and that code never executes.
+    name: End-to-end (${{ matrix.name }})
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: fan-out enabled
+            slug: redis
+            redis_url: redis://localhost:6379/0
+          - name: fan-out unavailable
+            slug: no-redis
+            redis_url: ""
     services:
       postgres:
         image: postgres:17-alpine
@@ -176,6 +205,14 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -191,6 +228,10 @@ jobs:
       # The real 60s resend cooldown would make the resend spec race a production rate
       # limit; that enforcement is already proven deterministically in the unit suite.
       VERIFICATION__RESEND_COOLDOWN_SECONDS: "0"
+      # Encrypts stored project credentials. A fixed, throwaway key: it never leaves CI and
+      # protects nothing real, but the vault refuses to operate without one.
+      SECRETS__MASTER_KEY: "v1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+      REDIS_URL: ${{ matrix.redis_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -227,6 +268,24 @@ jobs:
             exit 1
           fi
 
+      # The realtime specs enqueue a job and wait for its events. Without a worker to
+      # claim it, nothing is ever emitted and those specs time out.
+      - name: Start the worker
+        run: |
+          nohup uv run dev-worker > /tmp/worker.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if grep -q "worker.started" /tmp/worker.log 2>/dev/null; then
+              echo "Worker is running"
+              break
+            fi
+            sleep 1
+          done
+          if ! grep -q "worker.started" /tmp/worker.log 2>/dev/null; then
+            echo "::error::Worker did not start within 30s"
+            cat /tmp/worker.log
+            exit 1
+          fi
+
       - name: Build and start the web app
         run: |
           pnpm --filter web build
@@ -253,11 +312,12 @@ jobs:
         if: failure()
         run: |
           echo "--- API ---"; tail -100 /tmp/api.log || true
+          echo "--- WORKER ---"; tail -100 /tmp/worker.log || true
           echo "--- WEB ---"; tail -100 /tmp/web.log || true
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.slug }}
           path: apps/web/playwright-report/
           retention-days: 7
