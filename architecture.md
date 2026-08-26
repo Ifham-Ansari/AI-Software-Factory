@@ -3,7 +3,7 @@
 > **Status:** Phase 1 is implemented; §§2-4, 9.1 and 11 now describe running code.
 > Everything from Phase 2 onward — the agent runtime, secrets, realtime, deployment — remains
 > design of record. Sections describing unbuilt phases are marked. As phases land, this file
-> must be rewritten to describe **what exists**. See [instructions.md](instructions.md) §9.
+> must be rewritten to describe **what exists**. See [instructions.md](instructions.md) §4.
 
 **Last verified against upstream ecosystem:** 2026-08-23.
 

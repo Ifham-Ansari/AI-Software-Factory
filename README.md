@@ -402,21 +402,28 @@ tests/          cross-cutting end-to-end suites
 ## Development workflow
 
 ```
-Read docs → inspect code → design → implement → TEST → fix → verify criteria → document → commit
+Read docs → inspect code → design → implement → TEST → fix → verify criteria
+          → document → pre-push verification → hand off for commit
 ```
 
 Phases are built strictly in order, and a phase is complete only when its acceptance criteria have
 passing tests — not when the code compiles. Full procedure in [instructions.md](instructions.md).
 
-Two rules that matter more than the rest: **after implementing anything, test it before moving on**,
-and **no source file exceeds 250 lines** (enforced in CI).
+Three rules that matter more than the rest: **after implementing anything, test it before moving
+on**; **no source file exceeds 250 lines** (enforced in CI); and **every change goes through the
+pre-push verification** in [instructions.md](instructions.md) §14 — every applicable CI job
+reproduced locally — before it is called done.
+
+**Git is done by hand.** Claude Code and any other assistant working in this repository may read the
+repository (`git status`, `git diff`, `git log`) but never commit, push, or change remote state.
+Verified changes are left in the working tree for a human to review and commit.
 
 ## Roadmap
 
 | Phase | Delivers | Status |
 |---|---|---|
 | 1 | Platform foundation, auth, projects, contracts, CI | **Complete** |
-| 2 | Secret vault, event bus, WebSocket, job queue | **Complete** |
+| 2 | Secret vault, event bus, WebSocket, job queue, project UI | **Complete** |
 | 3 | Agent runtime, tool framework, budgets, HITL, intake | Not started |
 | 4 | Hierarchical supervision, parallelism, recovery, arbitration | Not started |
 | 5 | Sandboxed workspace, code generation, git | Not started |

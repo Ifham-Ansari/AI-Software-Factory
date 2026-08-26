@@ -26,6 +26,46 @@ test.describe("theme", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   });
 
+  test("the toggle sits inside the auth card, and only one of it exists", async ({ page }) => {
+    // It used to float above the card like browser furniture. Asserted geometrically
+    // rather than by class name: what was wrong was where it appeared, not what it was
+    // called, and a class assertion would pass again the moment someone renamed it.
+    await page.goto("/login");
+
+    await expect(page.getByTestId("theme-toggle")).toHaveCount(1);
+    const toggle = await page.getByTestId("theme-toggle").boundingBox();
+    const card = await page.locator(".auth-card").boundingBox();
+    expect(toggle).not.toBeNull();
+    expect(card).not.toBeNull();
+    expect(toggle!.y).toBeGreaterThanOrEqual(card!.y);
+    expect(toggle!.y + toggle!.height).toBeLessThanOrEqual(card!.y + card!.height);
+    expect(toggle!.x).toBeGreaterThanOrEqual(card!.x);
+    expect(toggle!.x + toggle!.width).toBeLessThanOrEqual(card!.x + card!.width);
+  });
+
+  test("is reachable on the registration card too, without a second control", async ({
+    page,
+  }) => {
+    await page.goto("/register");
+
+    await expect(page.getByTestId("theme-toggle")).toHaveCount(1);
+    await page.getByTestId("theme-toggle").click();
+
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  });
+
+  test("stays inside the card on a narrow viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 720 });
+    await page.goto("/login");
+
+    const toggle = await page.getByTestId("theme-toggle").boundingBox();
+    const card = await page.locator(".auth-card").boundingBox();
+    expect(toggle!.x + toggle!.width).toBeLessThanOrEqual(card!.x + card!.width);
+    // And it must not sit on top of the heading it shares the row with.
+    const heading = await page.getByRole("heading", { name: "Welcome back" }).boundingBox();
+    expect(toggle!.y + toggle!.height).toBeLessThanOrEqual(heading!.y);
+  });
+
   test("remembers the choice across a reload, with no flash of the wrong theme", async ({
     page,
   }) => {

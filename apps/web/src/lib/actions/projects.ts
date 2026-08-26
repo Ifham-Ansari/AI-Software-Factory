@@ -55,13 +55,25 @@ export async function updateProjectAction(
   _previous: FormState,
   formData: FormData,
 ): Promise<FormState> {
+  // Carried back on every failure. React resets the form once the action completes,
+  // failure included, and an edit form that discards the text it is asking the user to fix
+  // is worse than one that never validated at all.
+  const submitted = {
+    name: String(formData.get("name") ?? ""),
+    description: String(formData.get("description") ?? ""),
+  };
+  const rejected = (message: string, fields?: Record<string, string>): FormState => ({
+    ...failure(message, fields),
+    values: submitted,
+  });
+
   const parsed = updateProjectSchema.safeParse({
     name: formData.get("name") ?? undefined,
     description: formData.get("description") ?? undefined,
   });
 
   if (!parsed.success) {
-    return failure("Please correct the errors below.", fieldErrors(parsed.error));
+    return rejected("Please correct the errors below.", fieldErrors(parsed.error));
   }
 
   try {
@@ -71,9 +83,9 @@ export async function updateProjectAction(
     });
   } catch (error) {
     if (error instanceof ApiError && error.isValidationError) {
-      return failure("Please correct the errors below.", error.fieldErrors());
+      return rejected("Please correct the errors below.", error.fieldErrors());
     }
-    return failure(toUserMessage(error));
+    return rejected(toUserMessage(error));
   }
 
   revalidatePath(PROJECTS_PATH);

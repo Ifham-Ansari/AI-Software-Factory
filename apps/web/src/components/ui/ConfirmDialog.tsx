@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Alert } from "./Feedback";
 import { Button } from "./Button";
 import { Modal } from "./Modal";
 
@@ -14,6 +15,11 @@ import { Modal } from "./Modal";
  *    safe choice takes the focus; the dangerous one has to be aimed at.
  * 2. **Backdrop dismissal is disabled while the action is running.** Closing mid-request
  *    would leave the user with no idea whether the deletion happened.
+ * 3. **A failure is reported inside the dialog.** The dialog stays open when the action
+ *    fails, and the page behind it is inert and covered by the backdrop — so a message
+ *    rendered out there is one the user cannot read and, with the top layer above it,
+ *    cannot see. The place to say "that did not work" is the surface still in front of
+ *    them.
  *
  * `<dialog>` focuses its first focusable child by default, which would be whatever the
  * footer happens to order first — so focus is placed explicitly rather than left to
@@ -29,6 +35,8 @@ interface ConfirmDialogProps {
   /** Styles the confirm button as destructive. */
   destructive?: boolean;
   pending?: boolean;
+  /** Why the last attempt failed. Shown in the dialog, which stays open. */
+  error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -41,6 +49,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   destructive = false,
   pending = false,
+  error = null,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -71,6 +80,8 @@ export function ConfirmDialog({
           </Button>
         </>
       }
-    />
+    >
+      {error && <Alert variant="error">{error}</Alert>}
+    </Modal>
   );
 }

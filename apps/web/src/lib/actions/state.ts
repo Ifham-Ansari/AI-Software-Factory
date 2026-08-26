@@ -16,6 +16,15 @@ export interface FormState {
   success?: boolean;
   /** A positive message to show above the form, e.g. after a resend. */
   message?: string;
+  /**
+   * What was submitted, returned so a rejected form can re-render still holding it.
+   *
+   * React resets an uncontrolled form once its action completes — including when the
+   * action failed — so without this a validation error throws away the very text the user
+   * is being asked to correct. Populate it only with fields that are safe to echo back:
+   * never a password, never anything derived from a secret.
+   */
+  values?: Record<string, string>;
 }
 
 /** The state a form starts in, before anything has been submitted. */

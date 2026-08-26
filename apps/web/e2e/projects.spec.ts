@@ -24,7 +24,9 @@ test.describe("project lifecycle", () => {
     await expect(page.getByTestId("project-status")).toHaveText("Archived");
 
     // And it is reversible, which is what makes it archiving rather than a slow delete.
+    // Reversible, but still confirmed: it is a state change the user may not have meant.
     await page.getByRole("button", { name: "Unarchive" }).click();
+    await page.getByRole("button", { name: "Yes, unarchive" }).click();
     await expect(page.getByTestId("project-status")).toHaveText("Draft");
 
     // Deletion is confirmed, not immediate.

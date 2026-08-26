@@ -128,6 +128,23 @@ h3 {
   color: var(--text-muted);
 }
 
+/*
+ * Available to assistive technology, invisible on screen. Used where a visual cue carries
+ * meaning that has no text — a shimmering placeholder says "loading" to anyone who can
+ * see it and nothing at all to anyone who cannot.
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------- Buttons ---------- */
 .btn {
   display: inline-flex;
@@ -173,9 +190,19 @@ h3 {
   color: var(--text);
   border-color: var(--border);
 }
+/* Secondary and danger had no hover state at all: the two controls that carry archiving
+   and deletion gave no feedback that the pointer was on them. */
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
 .btn-danger {
   background: var(--danger);
   color: #fff;
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 88%, #000);
+  box-shadow: 0 4px 16px -4px var(--danger-soft);
 }
 .btn-ghost {
   background: transparent;
@@ -322,15 +349,17 @@ h3 {
   margin-bottom: var(--space-4);
   font-size: 0.875rem;
 }
+/* Tokenised. These were fixed pale pinks and greens chosen for the dark theme, which left
+   the light theme showing near-white text on a pale tint. */
 .alert-error {
-  background: rgb(229 72 77 / 0.1);
+  background: var(--danger-soft);
   border-color: var(--danger);
-  color: #ffb3b5;
+  color: var(--danger);
 }
 .alert-success {
-  background: rgb(61 214 140 / 0.1);
+  background: var(--success-soft);
   border-color: var(--success);
-  color: #9ef0c4;
+  color: var(--success);
 }
 .alert-info {
   background: var(--surface-raised);
@@ -341,16 +370,31 @@ h3 {
   padding: var(--space-8);
   text-align: center;
   border: 1px dashed var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
   color: var(--text-muted);
 }
 .empty-state h2 {
   color: var(--text);
+  margin-bottom: var(--space-2);
+}
+.empty-state p {
+  margin: 0;
+  font-size: 0.875rem;
 }
 
 .skeleton-list {
   display: grid;
   gap: var(--space-3);
+}
+/* One shimmering surface, shared by every placeholder, so they pulse together rather than
+   drifting out of phase with each other. */
+.shimmer {
+  display: block;
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, var(--surface), var(--surface-raised), var(--surface));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
 }
 .skeleton-row {
   height: 72px;
@@ -363,6 +407,49 @@ h3 {
   to {
     background-position: -200% 0;
   }
+}
+
+/*
+ * The project list's placeholder mirrors a project card rather than being a plain bar, so
+ * the layout does not jump when the real list arrives.
+ */
+.project-skeleton ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.project-skeleton-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: var(--space-4) var(--space-6);
+  display: grid;
+  gap: var(--space-3);
+}
+.project-skeleton-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.project-skeleton-title {
+  height: 1rem;
+  width: min(14rem, 55%);
+}
+.project-skeleton-badge {
+  height: 1rem;
+  width: 4.5rem;
+  border-radius: 999px;
+}
+.project-skeleton-line {
+  height: 0.75rem;
+  width: 80%;
+}
+.project-skeleton-meta {
+  height: 0.75rem;
+  width: 40%;
 }
 .loading-state {
   display: flex;
@@ -521,7 +608,13 @@ h3 {
     transform 150ms ease,
     box-shadow 150ms ease;
 }
-.project-card:hover {
+/*
+ * `:focus-within` matches `:hover` so a keyboard user gets the same signal a mouse user
+ * does. Without it the card a user has tabbed to is the only one on the page giving no
+ * indication that it is the one they are on.
+ */
+.project-card:hover,
+.project-card:focus-within {
   border-color: var(--accent);
   transform: translateY(-1px);
   box-shadow: var(--shadow-raised);
@@ -569,7 +662,11 @@ h3 {
 .project-detail-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-3);
+}
+.project-detail-header h1 {
+  margin-bottom: 0;
 }
 .project-facts {
   display: grid;
@@ -956,12 +1053,25 @@ h3 {
   --theme-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'/%3E%3C/svg%3E");
 }
 
-.auth-layout-toolbar {
-  display: flex;
-  justify-content: flex-end;
+/*
+ * The auth card and its theme toggle. The wrapper is the card's width and the toggle is
+ * positioned against it, so the control sits in the card's own top-right corner — opposite
+ * the mark — at every viewport width, instead of floating above the page like browser
+ * furniture. Absolute rather than a flex row inside the card because the card is rendered
+ * by the page's own component, and this must serve sign-in, registration and verification
+ * without any of the three having to know about it.
+ */
+.auth-panel {
+  position: relative;
   width: 100%;
-  max-width: 26rem;
-  margin-bottom: var(--space-3);
+  max-width: 24rem;
+}
+.auth-panel .theme-toggle {
+  position: absolute;
+  /* Aligned with the centre of the 36px mark inside the card's 2rem top padding. */
+  top: calc(var(--space-8) + 2px);
+  right: var(--space-6);
+  z-index: 1;
 }
 
 /* ---------- Status filters ---------- */
@@ -992,6 +1102,39 @@ h3 {
 }
 
 /* ---------- Motion ---------- */
+/*
+ * Entrance motion is opt-in under `no-preference`, not opt-out under `reduce`. Written the
+ * other way round, an animation added later is live for everyone until someone remembers
+ * to exclude it — and the ones nobody remembers are exactly the ones that cause harm.
+ *
+ * The stagger is capped at four cards: past that it stops reading as one list arriving and
+ * starts reading as a queue the user is waiting on.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .project-list .project-card {
+    animation: rise-in 220ms ease-out backwards;
+  }
+  .project-list .project-card:nth-child(2) {
+    animation-delay: 45ms;
+  }
+  .project-list .project-card:nth-child(3) {
+    animation-delay: 90ms;
+  }
+  .project-list .project-card:nth-child(n + 4) {
+    animation-delay: 135ms;
+  }
+  .project-skeleton-card,
+  .empty-state {
+    animation: rise-in 220ms ease-out backwards;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
 /*
  * Honour a reduced-motion preference globally rather than per-component: a rule added
  * later would otherwise have to remember, and the ones that forget are the ones that

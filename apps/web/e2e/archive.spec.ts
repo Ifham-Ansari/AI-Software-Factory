@@ -7,6 +7,10 @@ import { registerAndSignIn } from "./helpers";
  * Archiving used to fire on one click with no way back, which made it indistinguishable
  * from a delete that took a moment longer to notice. These cover the round trip and,
  * just as importantly, that an archived project can still be found.
+ *
+ * Both directions are confirmed. Unarchiving is reversible, but it is still a state change
+ * the user may not have meant, and it occupies the same position on the row that Archive
+ * did — so the click that reaches it is exactly the one aimed at something else.
  */
 
 async function createAndOpen(page: Page, name: string): Promise<void> {
@@ -20,6 +24,11 @@ async function archive(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Archive" }).click();
   await page.getByRole("button", { name: "Yes, archive" }).click();
   await expect(page.getByTestId("project-status")).toHaveText("Archived");
+}
+
+async function unarchive(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Unarchive" }).click();
+  await page.getByRole("button", { name: "Yes, unarchive" }).click();
 }
 
 test.describe("archiving", () => {
@@ -39,12 +48,57 @@ test.describe("archiving", () => {
     await createAndOpen(page, "Round Trip");
     await archive(page);
 
-    await page.getByRole("button", { name: "Unarchive" }).click();
+    await unarchive(page);
 
     await expect(page.getByTestId("project-status")).toHaveText("Draft");
-    // The Archive control returning is the visible proof the project accepts changes
-    // again — an archived one is read-only and offers no such option.
+    // The Archive and Edit controls returning are the visible proof the project accepts
+    // changes again — an archived one is read-only and offers neither.
     await expect(page.getByRole("button", { name: "Archive" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  });
+
+  test("asks before unarchiving, and can be called off", async ({ page }) => {
+    await registerAndSignIn(page);
+    await createAndOpen(page, "Stays Filed");
+    await archive(page);
+
+    await page.getByRole("button", { name: "Unarchive" }).click();
+    await expect(page.getByText("Unarchive this project?")).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+
+    await expect(page.getByRole("dialog")).toBeHidden();
+    // Cancel leaves the project exactly as it was, on the page and on the server.
+    await expect(page.getByTestId("project-status")).toHaveText("Archived");
+    await page.reload();
+    await expect(page.getByTestId("project-status")).toHaveText("Archived");
+  });
+
+  test("leaves no second trigger behind once it has run", async ({ page }) => {
+    // Confirming is the only way to fire the action, and the dialog carrying that button
+    // closes on success — so there is nothing left to click a second time. That the button
+    // is also disabled *during* the request is asserted in the component suite, where the
+    // pending state can be held still rather than raced against.
+    await registerAndSignIn(page);
+    await createAndOpen(page, "One Request Only");
+    await archive(page);
+
+    await page.getByRole("button", { name: "Unarchive" }).click();
+    const confirm = page.getByRole("button", { name: "Yes, unarchive" });
+    await confirm.click();
+
+    await expect(page.getByTestId("project-status")).toHaveText("Draft");
+    await expect(confirm).toBeHidden();
+  });
+
+  test("an archived project offers no way to edit it", async ({ page }) => {
+    // Archived means read-only, and the backend refuses the write. Offering the control
+    // anyway would be an invitation to a 403.
+    await registerAndSignIn(page);
+    await createAndOpen(page, "Read Only");
+    await archive(page);
+
+    await expect(page.getByRole("button", { name: "Edit" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Archive", exact: true })).toBeHidden();
   });
 
   test("an archived project is still listed and still reachable", async ({ page }) => {

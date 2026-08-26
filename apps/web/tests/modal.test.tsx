@@ -136,4 +136,51 @@ describe("ConfirmDialog", () => {
 
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
   });
+
+  it("disables confirm while the action runs, so it cannot fire twice", async () => {
+    // Without this a second click reaches the same handler and the action runs again —
+    // two archive requests for one intention.
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(<ConfirmDialog {...props} pending onConfirm={onConfirm} onCancel={vi.fn()} />);
+    const confirm = screen.getByRole("button", { name: props.confirmLabel });
+
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-busy", "true");
+    await user.click(confirm).catch(() => undefined);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("reports a failure inside the dialog, where the user is looking", () => {
+    // The dialog stays open when the action fails, and the page behind it is inert and
+    // covered by the backdrop — a message rendered out there cannot be read.
+    render(
+      <ConfirmDialog
+        {...props}
+        error="The project could not be deleted."
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const dialog = screen.getByRole("heading", { name: props.title }).closest("dialog");
+    expect(dialog).toContainElement(screen.getByRole("alert"));
+    expect(screen.getByRole("alert")).toHaveTextContent("The project could not be deleted.");
+  });
+
+  it("shows nothing where the message would go when there is no failure", () => {
+    render(<ConfirmDialog {...props} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("still offers a retry after a failure", () => {
+    // A dialog that reports a failure and then disables its own confirm button leaves the
+    // user with nothing to do but cancel and start again.
+    render(
+      <ConfirmDialog {...props} error="Try again." onConfirm={vi.fn()} onCancel={vi.fn()} />,
+    );
+
+    expect(screen.getByRole("button", { name: props.confirmLabel })).toBeEnabled();
+  });
 });

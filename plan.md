@@ -364,8 +364,22 @@ flag threaded through the existing one — the exception is narrow, named, and t
 owner scoping in its own right, because a policy reached by a different route is exactly
 where a scope check gets forgotten.
 
-Unarchiving is **not** confirmed: it is not destructive, archiving again undoes it, and a
-prompt on a safe action teaches people to dismiss prompts.
+~~Unarchiving is **not** confirmed: it is not destructive, archiving again undoes it, and a
+prompt on a safe action teaches people to dismiss prompts.~~
+
+**Amended 2026-08-26: unarchiving is confirmed too.** The original reasoning held that a
+reversible action does not need a gate, and in isolation that is right. It missed two
+things about this particular control. It occupies the same position on the action row that
+Archive occupies the rest of the time, so the click that reaches it is very often the one
+aimed at something else — the case a prompt exists for. And a row where two of three
+controls ask and the third does not teaches the habit the original argument was trying to
+avoid: people learn that the dialogs on this screen are arbitrary rather than meaningful.
+Consistency across one row of controls is worth more here than saving a click on the rarer
+of the two directions.
+
+The dialog says plainly what will change — the project returns to `draft` and starts
+accepting changes again, and nothing recorded against it is altered — so it informs rather
+than merely interrupting.
 
 **Two themes, chosen explicitly.** Dark and light, with no "system" option and no
 `prefers-color-scheme` in the stylesheet — the setting is the user's and is stored. The
@@ -390,6 +404,59 @@ which is only true because the poll exists. Sharing one subscription per run acr
 sockets watching it would lift the limit and is the obvious change if it ever binds; it is
 not made now because Phase 2 has no concurrency requirement that needs it, and refcounted
 subscriptions are a real piece of state to get wrong.
+
+### 5.4 Project editing, and the project experience (added 2026-08-26)
+
+**Editing was already built everywhere except the screen.** `PATCH /projects/{id}`,
+`UpdateProjectCommand`, `ProjectService.update` and `updateProjectAction` all existed and
+were tested; the only missing piece was a control. So F-221 is a dialog and nothing else —
+no new endpoint, no new schema, no migration. Finding the back half of a feature already
+in place is the normal outcome of the "inspect the code before writing any" rule, and the
+right response is to use it rather than to build a second way in.
+
+Two constraints shape it. **Only `name` and `description` are editable**: the slug is
+derived from the name by the backend, so exposing it would let the two disagree, and status
+is a lifecycle decision with its own controls. And **the control is absent on an archived
+project**, because `ensure_can_modify_project` refuses the write — offering a button whose
+only outcome is a 403 is worse than not offering it.
+
+**A dialog reports its own failures.** A confirmation or a form in a modal covers the page
+and makes it inert, so a message rendered behind it is one the user can neither read nor
+reach. `ConfirmDialog` and the edit dialog therefore render their own error, stay open when
+the action fails, and dismiss only on success. This is the rule for every modal from here
+on: *the surface that took the action is the surface that reports it.*
+
+#### UI/UX standards for the project experience
+
+These are conventions, not decoration; new work follows them rather than re-deciding.
+
+* **Four states, always.** Loading, empty, error, populated. Not three.
+* **A placeholder has the shape of what it replaces.** The project list's skeleton mirrors
+  a project card — header, badge, description line, meta line — because the purpose of a
+  placeholder is that the layout does not jump when the content lands, and a generic block
+  of the wrong height guarantees that it does. A spinner is for an action, a skeleton is
+  for content, and the same skeleton serves the route's `loading.tsx` and the page's own
+  Suspense boundary so a navigation reads as one load rather than two.
+* **Placeholders are `aria-hidden`, with one live region beside them.** A screen reader
+  user needs to hear "loading" once, not to have four decorative bars described.
+* **Motion is opt-in under `prefers-reduced-motion: no-preference`**, never opt-out under
+  `reduce`. Written the other way round, the next animation someone adds is live for
+  everyone until they remember to exclude it — and the ones nobody remembers are exactly
+  the ones that cause harm. Entrances are ≤ 220 ms with a ≤ 6 px travel, and the list
+  stagger caps at four cards, past which it stops reading as a list arriving and starts
+  reading as a queue.
+* **`:focus-within` matches `:hover`.** A keyboard user gets the same signal a mouse user
+  does; a card that lifts under the pointer and does nothing under focus leaves the person
+  who cannot see the pointer with no indication of where they are.
+* **Every interactive control has hover, focus and disabled states.** Secondary and danger
+  buttons had no hover state at all — the two controls carrying archiving and deletion gave
+  no feedback that the pointer was on them.
+* **Colours come from the theme tokens.** A literal hex is a light-theme bug waiting to be
+  filed: the alert colours were pale pinks and greens picked for the dark theme and left
+  near-white text on a pale tint in the light one.
+* **One action at a time per surface.** While a lifecycle action runs, every control on the
+  row is disabled — otherwise a slow archive leaves Delete live beside it and the two race
+  for the same project.
 
 ---
 
@@ -798,7 +865,7 @@ Full records land in `docs/adr/` during implementation. Summary of what is alrea
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
 | 1 — Platform Foundation | **COMPLETE** | 2026-08-23 | 2026-08-24 | Email OTP verification added post-hoc; see §4.1. |
-| 2 — Secrets & Realtime | **COMPLETE** | 2026-08-24 | 2026-08-26 | 638 backend (90% cov) + 91 frontend + 32 e2e run over both fan-out states. Two-replica fan-out covered (§5.1); toasts and dialogs (§5.2); archiving made reversible and themes added (§5.3). |
+| 2 — Secrets & Realtime | **COMPLETE** | 2026-08-24 | 2026-08-26 | 638 backend (90% cov) + 102 frontend + 45 e2e run over both fan-out states. Two-replica fan-out covered (§5.1); toasts and dialogs (§5.2); archiving made reversible and themes added (§5.3); project editing and the UI/UX standards (§5.4). |
 | 3 — Agent Runtime & Intake | NOT STARTED | — | — | |
 | 4 — Hierarchical Supervision | NOT STARTED | — | — | |
 | 5 — Workspace & Code Gen | NOT STARTED | — | — | |
@@ -829,3 +896,6 @@ deployment.
 | 2026-08-23 | Initial plan. Eight phases defined. No implementation started. |
 | 2026-08-23 | Phase 1 implemented. Deviations recorded in §4.1. |
 | 2026-08-23 | Phase 1 verified end to end against real PostgreSQL. All 18 features `VERIFIED`. |
+| 2026-08-24 | Phase 2 implemented and verified. §5.1 records the deviations. |
+| 2026-08-26 | §5.2 (toasts and dialogs) and §5.3 (reversible archiving, themes) added after the phase's original scope. |
+| 2026-08-26 | §5.3 amended: unarchiving is now confirmed, reversing the original decision — reasoning recorded in place. §5.4 added: project editing (F-221) and the project experience standards (F-222). |

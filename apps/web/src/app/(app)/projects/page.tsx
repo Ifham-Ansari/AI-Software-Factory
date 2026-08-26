@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import type { PaginatedProjects } from "@factory/contracts";
 import { apiRequest } from "@/lib/api/client";
-import { Skeleton } from "@/components/ui";
 import { CreateProjectForm } from "@/features/projects/CreateProjectForm";
 import { ProjectList } from "@/features/projects/ProjectList";
+import { ProjectListSkeleton } from "@/features/projects/ProjectListSkeleton";
 
 export const metadata: Metadata = { title: "Projects" };
 
@@ -32,7 +32,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
     <div className="projects-page">
       <div className="projects-main">
         <h1>Projects</h1>
-        <Suspense fallback={<Skeleton rows={3} />}>
+        <Suspense fallback={<ProjectListSkeleton />}>
           <Projects searchParams={searchParams} />
         </Suspense>
       </div>

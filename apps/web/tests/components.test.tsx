@@ -5,6 +5,7 @@ import { Alert, Button, EmptyState, Field, StatusBadge } from "@/components/ui";
 import { ProjectCard } from "@/features/projects/ProjectCard";
 import { Pagination } from "@/features/projects/Pagination";
 import { ProjectList } from "@/features/projects/ProjectList";
+import { ProjectListSkeleton } from "@/features/projects/ProjectListSkeleton";
 import type { PageMeta, ProjectResponse } from "@factory/contracts";
 
 const project: ProjectResponse = {
@@ -187,5 +188,25 @@ describe("EmptyState", () => {
     render(<EmptyState title="Nothing" description="Add one" action={<button>Add</button>} />);
 
     expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument();
+  });
+});
+
+describe("ProjectListSkeleton", () => {
+  it("places one card-shaped placeholder per row it expects", () => {
+    render(<ProjectListSkeleton rows={4} />);
+
+    expect(screen.getByTestId("project-skeleton").querySelectorAll("li")).toHaveLength(4);
+  });
+
+  it("announces that it is loading, once", () => {
+    // A screen reader user needs to be told "loading" — not to have four decorative bars
+    // described to them, which is what an unhidden placeholder produces.
+    render(<ProjectListSkeleton />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading projects");
+    expect(screen.getByTestId("project-skeleton").querySelector("ul")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
   });
 });

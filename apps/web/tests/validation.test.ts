@@ -4,6 +4,7 @@ import {
   fieldErrors,
   registerSchema,
   signInSchema,
+  updateProjectSchema,
   MIN_PASSWORD_LENGTH,
 } from "@/lib/validation";
 
@@ -99,6 +100,47 @@ describe("createProjectSchema", () => {
     const result = createProjectSchema.safeParse({ name: "x".repeat(121) });
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe("updateProjectSchema", () => {
+  it("accepts a partial update", () => {
+    // Omitted means "leave unchanged" — this backs a PATCH, not a replacement.
+    const result = updateProjectSchema.safeParse({ name: "Renamed" });
+
+    expect(result.success && result.data.description).toBeUndefined();
+  });
+
+  it("accepts an empty description, which clears it", () => {
+    const result = updateProjectSchema.safeParse({ name: "Kept", description: "" });
+
+    expect(result.success && result.data.description).toBe("");
+  });
+
+  it("rejects a name cleared to whitespace, in words a user can act on", () => {
+    // The reason the messages are spelled out rather than left to Zod: this text is shown
+    // beside the field, and the default reads "String must contain at least 1 character(s)".
+    const result = updateProjectSchema.safeParse({ name: "   ", description: "" });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(fieldErrors(result.error).name).toBe("Project name is required");
+    }
+  });
+
+  it("rejects a name over the limit", () => {
+    const result = updateProjectSchema.safeParse({ name: "x".repeat(121) });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(fieldErrors(result.error).name).toBe("That name is too long");
+    }
+  });
+
+  it("trims whitespace, as the backend does", () => {
+    const result = updateProjectSchema.safeParse({ name: "  Spaced  " });
+
+    expect(result.success && result.data.name).toBe("Spaced");
   });
 });
 

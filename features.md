@@ -1,6 +1,6 @@
 # Feature Registry — AI Software Factory
 
-> **Phases 1 and 2 are complete: 34 features `VERIFIED`. Phases 3-8 remain `PLANNED`.**
+> **Phases 1 and 2 are complete: 36 features `VERIFIED`. Phases 3-8 remain `PLANNED`.**
 > This registry is the single source of truth for what exists. It is updated during a phase, not
 > after it. See [instructions.md](instructions.md) §4 for the update protocol.
 
@@ -33,16 +33,16 @@ registry is corrected — the registry follows the code, not the other way aroun
 
 ## Phase 1 — Platform Foundation & Contracts
 
-> **Phase 1 and 2 verification status.** All 34 features are `VERIFIED` — every one has a
+> **Phase 1 and 2 verification status.** All 36 features are `VERIFIED` — every one has a
 > test that ran and passed, against real infrastructure:
 >
 > | Suite | Count | Environment |
 > |---|---|---|
-> | Backend (unit, integration, security, failure) | 616 | Real PostgreSQL (Neon), 0 skipped |
-> | Frontend component and validation | 55 | jsdom |
-> | End-to-end (Playwright) | 16 | Full stack: Next.js + FastAPI + worker + PostgreSQL |
+> | Backend (unit, integration, security, failure) | 638 | Real PostgreSQL (Neon), 0 skipped |
+> | Frontend component and validation | 102 | jsdom |
+> | End-to-end (Playwright) | 45 | Full stack: Next.js + FastAPI + worker + PostgreSQL, run over both fan-out states |
 >
-> Backend coverage is 89% on `packages/core` against a gate of 85%.
+> Backend coverage is 90% on `packages/core` against a gate of 85%.
 >
 > The integration suite runs against a dedicated throwaway database, never the application
 > one. See [README.md](README.md#test) for how to point it at yours.
@@ -70,13 +70,13 @@ registry is corrected — the registry follows the code, not the other way aroun
 
 ## Phase 2 — Secure Configuration, Secrets & Realtime Backbone
 
-> **Phase 2 verification status.** All 16 features are `VERIFIED`. The secret vault, the
+> **Phase 2 verification status.** All 18 features are `VERIFIED`. The secret vault, the
 > event stream and the job queue are exercised against a real PostgreSQL; the Redis
 > primitives are exercised against both a working fake and one that fails every call,
 > because "Redis absent" and "Redis failing" take different branches and only the second
 > is the outage the acceptance criteria describe.
 >
-> **F-217 to F-220 were added after the phase's original scope.** They are frontend
+> **F-217 to F-222 were added after the phase's original scope.** They are frontend
 > infrastructure rather than new backend capability, and they exist because the flows Phase 1
 > and 2 already shipped needed them: an inline confirmation row guarding a permanent delete,
 > and success messages with nowhere to go. F-220 closes a genuine hole rather than adding
@@ -111,7 +111,9 @@ registry is corrected — the registry follows the code, not the other way aroun
 | F-217 | Toast notifications (transient action outcomes) | VERIFIED | F-105 | `apps/web/src/components/ui/Toast.tsx` | component + e2e | Errors never auto-dismiss; hovering pauses the countdown; the live region pre-exists its first message |
 | F-218 | Modal dialogs & destructive confirmation | VERIFIED | F-105 | `apps/web/src/components/ui/Modal.tsx`, `ConfirmDialog.tsx` | component + e2e | Focus never reaches the page behind; Escape routes through React; cancel holds initial focus |
 | F-219 | Dark and light themes (explicit, no system option) | VERIFIED | F-105 | `apps/web/src/lib/theme/`, `components/ui/ThemeToggle.tsx` | component + e2e | Stored choice applied before first paint — no flash; junk values fall back; syncs across tabs |
-| F-220 | Project unarchive & status filtering | VERIFIED | F-107 | `POST /projects/{id}/unarchive`, `features/projects/ProjectFilters.tsx` | unit + integration + security + e2e | Archiving is confirmed and reversible; an archived project stays listed and reachable |
+| F-220 | Project unarchive & status filtering | VERIFIED | F-107 | `POST /projects/{id}/unarchive`, `features/projects/ProjectFilters.tsx` | unit + integration + security + e2e | Archiving **and unarchiving** are confirmed, and archiving is reversible; an archived project stays listed and reachable |
+| F-221 | Project editing (name & description) | VERIFIED | F-107, F-218 | `features/projects/EditProjectDialog.tsx` over the existing `PATCH /projects/{id}` | component + e2e | Opens holding current values; a blank name is refused inline and changes nothing; a cancelled edit does not survive into the next open; archived projects offer no editor |
+| F-222 | Project experience: skeletons, motion, focus and state parity | VERIFIED | F-105 | `features/projects/ProjectListSkeleton.tsx`, `app/globals.css` | component + e2e | Placeholder has the shape of a project card and announces itself once; motion is opt-in under `no-preference`; `:focus-within` matches `:hover`; a running action disables the whole row |
 
 ## Phase 3 — Agent Runtime & Intake
 
@@ -243,14 +245,17 @@ registry is corrected — the registry follows the code, not the other way aroun
 | Phase | Features | VERIFIED | Status |
 |---|---|---|---|
 | 1 — Platform Foundation | 18 | 18 | **COMPLETE** |
-| 2 — Secrets & Realtime | 16 | 0 | NOT STARTED |
+| 2 — Secrets & Realtime | 18 | 18 | **COMPLETE** |
 | 3 — Agent Runtime & Intake | 17 | 0 | NOT STARTED |
 | 4 — Hierarchical Supervision | 17 | 0 | NOT STARTED |
 | 5 — Workspace & Code Gen | 15 | 0 | NOT STARTED |
 | 6 — Verification & Recovery | 12 | 0 | NOT STARTED |
 | 7 — Database & Deployment | 17 | 0 | NOT STARTED |
 | 8 — Evaluation & Hardening | 15 | 0 | NOT STARTED |
-| **Total** | **127** | **18** | **Phase 1 complete** |
+| **Total** | **129** | **36** | **Phases 1 and 2 complete** |
+
+Phase 2 counts 18 rather than the 16 originally scoped: F-217 to F-222 were added during the
+phase and are delivered, tested and in use. Later phases still carry their original counts.
 
 ---
 
@@ -268,3 +273,6 @@ the date, and the superseding ID. Never delete a row and never reuse an ID.
 | 2026-08-23 | Registry created. 127 features across 8 phases, all `PLANNED`. |
 | 2026-08-23 | Phase 1 implemented. 14 features `VERIFIED`; F-103/104/105/109 `TESTING` pending a database. |
 | 2026-08-23 | Integration and e2e suites executed against real infrastructure. All 18 Phase 1 features `VERIFIED`. |
+| 2026-08-24 | Phase 2 implemented. F-201 to F-216 `VERIFIED`. |
+| 2026-08-26 | F-217 to F-220 added and `VERIFIED`: toasts, modal confirmation, themes, reversible archiving. |
+| 2026-08-26 | F-221 (project editing) and F-222 (project experience standards) added and `VERIFIED`. F-220's acceptance amended: unarchiving is confirmed too. Registry summary corrected — it still recorded Phase 2 as not started. |

@@ -58,14 +58,28 @@ export const createProjectSchema = z.object({
     .default(""),
 });
 
+// The same rules as `createProjectSchema`, with every field optional: this backs a PATCH,
+// where an omitted field means "leave it alone". The messages are spelled out rather than
+// left to Zod's defaults because these reach a user — an edit form that rejects a cleared
+// name with "String must contain at least 1 character(s)" is telling them about a library.
 export const updateProjectSchema = z.object({
-  name: z.string().trim().min(1).max(MAX_PROJECT_NAME_LENGTH).optional(),
-  description: z.string().trim().max(MAX_DESCRIPTION_LENGTH).optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Project name is required")
+    .max(MAX_PROJECT_NAME_LENGTH, "That name is too long")
+    .optional(),
+  description: z
+    .string()
+    .trim()
+    .max(MAX_DESCRIPTION_LENGTH, "That description is too long")
+    .optional(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type SignInInput = z.infer<typeof signInSchema>;
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 
 /** Flatten a Zod error into field-keyed messages for rendering next to inputs. */
 export function fieldErrors(error: z.ZodError): Record<string, string> {
