@@ -183,6 +183,42 @@ class TestArchiveAndDelete:
         with pytest.raises(AuthorizationError):
             await owner.service.archive(created.id)
 
+    async def test_restore_returns_it_to_draft(self, owner: Harness) -> None:
+        """Archiving must be reversible, or it is just a slow delete."""
+        created = await owner.service.create(CreateProjectCommand(name="Name"))
+        await owner.service.archive(created.id)
+
+        restored = await owner.service.restore(created.id)
+
+        assert restored.status is ProjectStatus.DRAFT
+        assert restored.archived_at is None
+        assert AuditAction.PROJECT_RESTORED in owner.audit.actions()
+
+    async def test_a_restored_project_is_writable_again(self, owner: Harness) -> None:
+        """The property that makes restoring worth having, rather than a status flip."""
+        created = await owner.service.create(CreateProjectCommand(name="Name"))
+        await owner.service.archive(created.id)
+        await owner.service.restore(created.id)
+
+        updated = await owner.service.update(created.id, UpdateProjectCommand(name="Changed"))
+
+        assert updated.name == "Changed"
+
+    async def test_restoring_something_not_archived_is_rejected(self, owner: Harness) -> None:
+        """Rejected rather than treated as a no-op, so a confused caller hears about it."""
+        created = await owner.service.create(CreateProjectCommand(name="Name"))
+
+        with pytest.raises(ValidationError):
+            await owner.service.restore(created.id)
+
+    @pytest.mark.security
+    async def test_stranger_cannot_restore(self, owner: Harness, stranger: Harness) -> None:
+        created = await owner.service.create(CreateProjectCommand(name="Mine"))
+        await owner.service.archive(created.id)
+
+        with pytest.raises(NotFoundError):
+            await stranger.service.restore(created.id)
+
     async def test_delete_removes_the_project(self, owner: Harness) -> None:
         created = await owner.service.create(CreateProjectCommand(name="Name"))
 

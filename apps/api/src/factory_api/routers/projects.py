@@ -126,6 +126,21 @@ async def archive_project(project_id: str, service: ProjectServiceDep) -> Projec
     return ProjectResponse.from_entity(await service.archive(_project_id(project_id)))
 
 
+@router.post(
+    "/{project_id}/unarchive",
+    response_model=ProjectResponse,
+    responses={**_AUTH_ERRORS, 403: {"model": ErrorResponse}},
+    summary="Take a project out of the archive",
+)
+async def unarchive_project(project_id: str, service: ProjectServiceDep) -> ProjectResponse:
+    """Return an archived project to ``draft``, making it writable again.
+
+    The counterpart to archiving. Without it, archiving is indistinguishable from a slow
+    delete, and users avoid it — which defeats the point of having it.
+    """
+    return ProjectResponse.from_entity(await service.restore(_project_id(project_id)))
+
+
 @router.delete(
     "/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,

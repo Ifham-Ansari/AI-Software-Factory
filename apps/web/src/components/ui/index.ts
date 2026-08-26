@@ -4,6 +4,7 @@ export { PasswordField } from "./PasswordField";
 export { CodeInput } from "./CodeInput";
 export { Alert, EmptyState, LoadingState, Skeleton } from "./Feedback";
 export { StatusBadge } from "./Badge";
+export { ThemeToggle } from "./ThemeToggle";
 export { Modal } from "./Modal";
 export { ConfirmDialog } from "./ConfirmDialog";
 export { ToastProvider, useToast } from "./Toast";

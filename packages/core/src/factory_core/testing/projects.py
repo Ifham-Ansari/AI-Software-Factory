@@ -165,6 +165,24 @@ class FakeProjectRepository:
         self._store.projects[project_id] = archived
         return archived
 
+    async def restore(
+        self, project_id: ProjectId, *, now: datetime | None = None
+    ) -> Project | None:
+        """Take one of this owner's projects out of the archive."""
+        existing = await self.get(project_id)
+        if existing is None:
+            return None
+        timestamp = now or datetime.now(UTC)
+        restored = existing.model_copy(
+            update={
+                "status": ProjectStatus.DRAFT,
+                "archived_at": None,
+                "updated_at": timestamp,
+            }
+        )
+        self._store.projects[project_id] = restored
+        return restored
+
     async def delete(self, project_id: ProjectId) -> bool:
         """Delete one of this owner's projects."""
         if await self.get(project_id) is None:

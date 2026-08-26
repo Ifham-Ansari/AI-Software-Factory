@@ -76,11 +76,13 @@ registry is corrected — the registry follows the code, not the other way aroun
 > because "Redis absent" and "Redis failing" take different branches and only the second
 > is the outage the acceptance criteria describe.
 >
-> **F-217 and F-218 were added after the phase's original scope.** They are frontend
+> **F-217 to F-220 were added after the phase's original scope.** They are frontend
 > infrastructure rather than new backend capability, and they exist because the flows Phase 1
 > and 2 already shipped needed them: an inline confirmation row guarding a permanent delete,
-> and success messages with nowhere to go. They are recorded here rather than deferred to a
-> later phase because they are delivered, tested and in use now.
+> and success messages with nowhere to go. F-220 closes a genuine hole rather than adding
+> polish: archiving was a one-way door, which made it a delete with extra steps. They are
+> recorded here rather than deferred to a later phase because they are delivered, tested
+> and in use now.
 >
 > Fan-out across **two replicas** is exercised against a real Redis, as are the subscription
 > behaviours a fake cannot represent — blocking reads, socket timeouts, and delivery from one
@@ -108,6 +110,8 @@ registry is corrected — the registry follows the code, not the other way aroun
 | F-216 | Key management runbook | VERIFIED | F-201 | `docs/runbooks/key-management.md` | integration | Rotation procedure executed successfully once |
 | F-217 | Toast notifications (transient action outcomes) | VERIFIED | F-105 | `apps/web/src/components/ui/Toast.tsx` | component + e2e | Errors never auto-dismiss; hovering pauses the countdown; the live region pre-exists its first message |
 | F-218 | Modal dialogs & destructive confirmation | VERIFIED | F-105 | `apps/web/src/components/ui/Modal.tsx`, `ConfirmDialog.tsx` | component + e2e | Focus never reaches the page behind; Escape routes through React; cancel holds initial focus |
+| F-219 | Dark and light themes (explicit, no system option) | VERIFIED | F-105 | `apps/web/src/lib/theme/`, `components/ui/ThemeToggle.tsx` | component + e2e | Stored choice applied before first paint — no flash; junk values fall back; syncs across tabs |
+| F-220 | Project unarchive & status filtering | VERIFIED | F-107 | `POST /projects/{id}/unarchive`, `features/projects/ProjectFilters.tsx` | unit + integration + security + e2e | Archiving is confirmed and reversible; an archived project stays listed and reachable |
 
 ## Phase 3 — Agent Runtime & Intake
 

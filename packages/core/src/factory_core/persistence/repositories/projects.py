@@ -152,6 +152,25 @@ class ProjectRepository(ScopedRepository):
         await self._session.flush()
         return to_project(row)
 
+    async def restore(
+        self, project_id: ProjectId, *, now: datetime | None = None
+    ) -> Project | None:
+        """Take a project out of the archive, returning it to ``draft``.
+
+        ``archived_at`` is cleared rather than kept: it records the archive a project is
+        currently in, not a history of every archive it has ever been in. The audit log is
+        where that history lives.
+        """
+        row = await self._scoped_row(project_id)
+        if row is None:
+            return None
+        timestamp = now or datetime.now(UTC)
+        row.status = ProjectStatus.DRAFT.value
+        row.archived_at = None
+        row.updated_at = timestamp
+        await self._session.flush()
+        return to_project(row)
+
     async def delete(self, project_id: ProjectId) -> bool:
         """Permanently delete a project.
 

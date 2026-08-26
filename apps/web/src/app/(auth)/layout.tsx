@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { hasSession } from "@/lib/auth/session";
+import { ThemeToggle } from "@/components/ui";
 
 /**
  * Layout for signed-out pages.
@@ -10,5 +11,14 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
   if (await hasSession()) {
     redirect("/projects");
   }
-  return <main className="auth-layout">{children}</main>;
+  return (
+    <main className="auth-layout">
+      {/* Reachable before signing in: someone who cannot read the form is not helped by a
+          theme switch that lives behind it. */}
+      <div className="auth-layout-toolbar">
+        <ThemeToggle />
+      </div>
+      {children}
+    </main>
+  );
 }

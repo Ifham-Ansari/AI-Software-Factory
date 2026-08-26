@@ -2971,6 +2971,84 @@
         ]
       }
     },
+    "/projects/{project_id}/unarchive": {
+      "post": {
+        "description": "Return an archived project to ``draft``, making it writable again.\n\nThe counterpart to archiving. Without it, archiving is indistinguishable from a slow\ndelete, and users avoid it \u2014 which defeats the point of having it.",
+        "operationId": "unarchive_project_projects__project_id__unarchive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Take a project out of the archive",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/ready": {
       "get": {
         "description": "Report whether this process can serve traffic.\n\nReturns 503 with a per-dependency breakdown when something it depends on is down, so\nthe load balancer stops routing here while the process stays up.",

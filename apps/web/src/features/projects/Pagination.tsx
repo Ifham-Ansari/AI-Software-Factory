@@ -8,13 +8,21 @@ import type { PageMeta } from "@factory/contracts";
  * function without JavaScript. Hidden entirely when there is only one page — controls
  * that cannot do anything are noise.
  */
-export function Pagination({ meta }: { meta: PageMeta }) {
+export function Pagination({ meta, status }: { meta: PageMeta; status?: string }) {
   if (meta.total_pages <= 1) return null;
+
+  // The filter has to survive paging. Without it, page 2 of "Archived" silently becomes
+  // page 2 of everything, and the list appears to change under the user.
+  const href = (page: number): string => {
+    const query = new URLSearchParams({ page: String(page) });
+    if (status) query.set("status", status);
+    return `/projects?${query}`;
+  };
 
   return (
     <nav className="pagination" aria-label="Pagination">
       {meta.has_previous ? (
-        <Link href={`/projects?page=${meta.page - 1}`} rel="prev">
+        <Link href={href(meta.page - 1)} rel="prev">
           ← Previous
         </Link>
       ) : (
@@ -26,7 +34,7 @@ export function Pagination({ meta }: { meta: PageMeta }) {
       </span>
 
       {meta.has_next ? (
-        <Link href={`/projects?page=${meta.page + 1}`} rel="next">
+        <Link href={href(meta.page + 1)} rel="next">
           Next →
         </Link>
       ) : (

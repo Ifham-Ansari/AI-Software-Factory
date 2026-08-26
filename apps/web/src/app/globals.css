@@ -6,19 +6,70 @@
  * Tokens mean a design system can be dropped in later without touching every component.
  */
 
-:root {
-  --bg: #0b0e14;
-  --surface: #131823;
-  --surface-raised: #1a2030;
-  --border: #262d3d;
-  --text: #e6e9f0;
-  --text-muted: #939cb0;
-  --accent: #4f7cff;
-  --accent-hover: #6b91ff;
-  --accent-soft: rgb(79 124 255 / 0.12);
-  --danger: #e5484d;
-  --success: #3dd68c;
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
+  --bg: #0a0d13;
+  --bg-subtle: #0e121b;
+  --surface: #141926;
+  --surface-raised: #1b2130;
+  --surface-hover: #202737;
+  --border: #262d3d;
+  --border-strong: #333c50;
+  --text: #e8ebf2;
+  --text-muted: #97a0b5;
+  --accent: #5b86ff;
+  --accent-hover: #7ba0ff;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgb(91 134 255 / 0.14);
+  --danger: #f0575c;
+  --danger-soft: rgb(240 87 92 / 0.14);
+  --success: #3dd68c;
+  --success-soft: rgb(61 214 140 / 0.14);
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.24), 0 12px 32px -18px rgb(0 0 0 / 0.6);
+  --shadow-raised: 0 24px 56px -24px rgb(0 0 0 / 0.7);
+}
+
+/*
+ * Light theme.
+ *
+ * Two explicit themes, and no `prefers-color-scheme` anywhere: the choice is the user's
+ * and is stored, not inferred from the operating system. `color-scheme` still has to be
+ * set per theme so the browser paints form controls, scrollbars and the caret to match —
+ * without it a light page gets dark native widgets.
+ *
+ * The light palette is not the dark one inverted. Shadows are lighter and tighter because
+ * a dark shadow on a light ground reads as dirt, and the accent is darkened to hold its
+ * contrast against white.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f6f7f9;
+  --bg-subtle: #eef0f4;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-hover: #f2f4f8;
+  --border: #dfe3ea;
+  --border-strong: #c4cad6;
+  --text: #151a24;
+  --text-muted: #5d6577;
+  --accent: #3055d8;
+  --accent-hover: #2544bd;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgb(48 85 216 / 0.09);
+  --danger: #c8262c;
+  --danger-soft: rgb(200 38 44 / 0.09);
+  --success: #16794a;
+  --success-soft: rgb(22 121 74 / 0.1);
+
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 8px 24px -16px rgb(16 24 40 / 0.22);
+  --shadow-raised: 0 18px 44px -22px rgb(16 24 40 / 0.28);
+}
+
+:root {
   --radius: 8px;
   --radius-lg: 14px;
   --space-1: 0.25rem;
@@ -27,9 +78,6 @@
   --space-4: 1rem;
   --space-6: 1.5rem;
   --space-8: 2rem;
-
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.2), 0 12px 32px -16px rgb(0 0 0 / 0.5);
-  --shadow-raised: 0 20px 48px -20px rgb(0 0 0 / 0.65);
 
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -357,7 +405,9 @@ h3 {
   display: grid;
   place-items: center;
   padding: var(--space-4);
-  background: radial-gradient(60rem 40rem at 50% -10%, rgb(79 124 255 / 0.16), transparent 60%),
+  /* Tokenised: a literal colour here stayed dark-blue in the light theme. */
+  background:
+    radial-gradient(60rem 40rem at 50% -10%, var(--accent-soft), transparent 60%),
     var(--bg);
 }
 .auth-card {
@@ -405,7 +455,8 @@ h3 {
   gap: var(--space-4);
   padding: var(--space-3) var(--space-6);
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(8px);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -445,8 +496,11 @@ h3 {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--space-4);
+  padding: var(--space-6);
   box-shadow: var(--shadow-card);
+}
+.panel + .panel {
+  margin-top: var(--space-4);
 }
 
 .project-list {
@@ -460,13 +514,17 @@ h3 {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--space-4);
+  padding: var(--space-4) var(--space-6);
   box-shadow: var(--shadow-card);
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  transition:
+    border-color 150ms ease,
+    transform 150ms ease,
+    box-shadow 150ms ease;
 }
 .project-card:hover {
   border-color: var(--accent);
   transform: translateY(-1px);
+  box-shadow: var(--shadow-raised);
 }
 .project-card-header {
   display: flex;
@@ -540,11 +598,17 @@ h3 {
 
 .project-actions {
   display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-6) 0;
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border);
+}
+.project-actions-row {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--border);
 }
 
 .error-page {
@@ -850,5 +914,96 @@ h3 {
       opacity: 0;
       transform: translateY(6px);
     }
+  }
+}
+
+/* ---------- Theme toggle ---------- */
+/*
+ * The icon shows the destination, not the current state: pressing a sun should give you
+ * a light page. Drawn with a mask so it inherits `currentColor` and needs no per-theme
+ * asset.
+ */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+.theme-toggle:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.theme-toggle-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  background-color: currentColor;
+  mask: var(--theme-icon) center / contain no-repeat;
+  -webkit-mask: var(--theme-icon) center / contain no-repeat;
+}
+:root[data-theme="dark"] .theme-toggle-icon {
+  --theme-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4'/%3E%3C/svg%3E");
+}
+:root[data-theme="light"] .theme-toggle-icon {
+  --theme-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'/%3E%3C/svg%3E");
+}
+
+.auth-layout-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  max-width: 26rem;
+  margin-bottom: var(--space-3);
+}
+
+/* ---------- Status filters ---------- */
+.project-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.filter-chip {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+.filter-chip:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+.filter-chip-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* ---------- Motion ---------- */
+/*
+ * Honour a reduced-motion preference globally rather than per-component: a rule added
+ * later would otherwise have to remember, and the ones that forget are the ones that
+ * cause harm. Reduced, not removed — `01ms` keeps transition-end handlers firing.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

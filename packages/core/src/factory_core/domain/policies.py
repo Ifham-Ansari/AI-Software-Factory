@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from factory_core.domain.entities import Project, User
 from factory_core.domain.ids import UserId
-from factory_core.errors import AuthorizationError, NotFoundError
+from factory_core.errors import AuthorizationError, NotFoundError, ValidationError
 
 
 def can_access_project(actor_id: UserId, project: Project) -> bool:
@@ -51,6 +51,27 @@ def ensure_can_modify_project(actor_id: UserId, project: Project | None) -> Proj
     accessible = ensure_can_access_project(actor_id, project)
     if accessible.is_archived:
         raise AuthorizationError("An archived project cannot be modified.")
+    return accessible
+
+
+def ensure_can_restore_project(actor_id: UserId, project: Project | None) -> Project:
+    """Return the project if this actor may take it out of the archive.
+
+    Deliberately *not* built on :func:`ensure_can_modify_project`, which refuses archived
+    projects. Restoring is the single change an archived project has to accept: if every
+    write is blocked, archiving is a one-way trip and the only way back is deletion — which
+    is exactly the trap this pair of functions exists to avoid.
+
+    Ownership is still enforced, and restoring something that is not archived is rejected
+    rather than treated as a no-op, so a confused caller hears about it.
+
+    Raises:
+        NotFoundError: The project does not exist, or belongs to someone else.
+        ValidationError: The project is not archived, so there is nothing to restore.
+    """
+    accessible = ensure_can_access_project(actor_id, project)
+    if not accessible.is_archived:
+        raise ValidationError("This project is not archived.")
     return accessible
 
 

@@ -55,6 +55,7 @@ class AuditAction(StrEnum):
     PROJECT_CREATED = "project.created"
     PROJECT_UPDATED = "project.updated"
     PROJECT_ARCHIVED = "project.archived"
+    PROJECT_RESTORED = "project.restored"
     PROJECT_DELETED = "project.deleted"
 
     # Authorization

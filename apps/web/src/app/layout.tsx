@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ToastProvider } from "@/components/ui";
+import { DEFAULT_THEME, THEME_INIT_SCRIPT } from "@/lib/theme/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -27,7 +28,12 @@ export const metadata: Metadata = {
  */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-theme={DEFAULT_THEME} suppressHydrationWarning>
+      <head>
+        {/* Applies the stored theme before the first paint. Anything later — including
+            hydration — shows a frame of the wrong colours on every load. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body suppressHydrationWarning>
         <ToastProvider>{children}</ToastProvider>
       </body>

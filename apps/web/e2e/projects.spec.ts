@@ -18,8 +18,14 @@ test.describe("project lifecycle", () => {
     await expect(page.getByRole("heading", { name: "Lifecycle Project" })).toBeVisible();
     await expect(page.getByTestId("project-status")).toHaveText("Draft");
 
+    // Archiving is confirmed too: it used to fire on a single click, with no way back.
     await page.getByRole("button", { name: "Archive" }).click();
+    await page.getByRole("button", { name: "Yes, archive" }).click();
     await expect(page.getByTestId("project-status")).toHaveText("Archived");
+
+    // And it is reversible, which is what makes it archiving rather than a slow delete.
+    await page.getByRole("button", { name: "Unarchive" }).click();
+    await expect(page.getByTestId("project-status")).toHaveText("Draft");
 
     // Deletion is confirmed, not immediate.
     await page.getByRole("button", { name: "Delete" }).click();

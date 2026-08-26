@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { UserResponse } from "@factory/contracts";
 import { apiRequestOrNull } from "@/lib/api/client";
 import { signOutAction } from "@/lib/actions/auth";
-import { Button } from "@/components/ui";
+import { Button, ThemeToggle } from "@/components/ui";
 
 /**
  * Layout for authenticated pages.
@@ -26,6 +26,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           AI Software Factory
         </Link>
         <div className="app-user">
+          <ThemeToggle />
           <span data-testid="current-user">{user.display_name}</span>
           <form action={signOutAction}>
             <Button type="submit" variant="ghost" size="sm">

@@ -18,7 +18,11 @@ from factory_core.domain.audit import AuditAction, AuditRequest
 from factory_core.domain.entities import Project
 from factory_core.domain.ids import ProjectId, UserId, new_project_id
 from factory_core.domain.pagination import Page
-from factory_core.domain.policies import ensure_can_access_project, ensure_can_modify_project
+from factory_core.domain.policies import (
+    ensure_can_access_project,
+    ensure_can_modify_project,
+    ensure_can_restore_project,
+)
 from factory_core.domain.values import slugify
 from factory_core.errors import AlreadyExistsError, ValidationError
 from factory_core.observability import get_logger
@@ -127,6 +131,23 @@ class ProjectService:
         await self._record(AuditAction.PROJECT_ARCHIVED, project_id)
         logger.info("project.archived", project_id=str(project_id))
         return archived
+
+    async def restore(self, project_id: ProjectId) -> Project:
+        """Take a project out of the archive.
+
+        Raises:
+            NotFoundError: No such project, or it belongs to someone else.
+            ValidationError: The project is not archived, so there is nothing to restore.
+        """
+        ensure_can_restore_project(self._actor_id, await self._projects.get(project_id))
+
+        restored = await self._projects.restore(project_id, now=self._clock.now())
+        if restored is None:
+            raise ValidationError("The project could not be restored.")
+
+        await self._record(AuditAction.PROJECT_RESTORED, project_id)
+        logger.info("project.restored", project_id=str(project_id))
+        return restored
 
     async def delete(self, project_id: ProjectId) -> None:
         """Permanently delete a project.

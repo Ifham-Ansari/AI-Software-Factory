@@ -95,6 +95,20 @@ export async function archiveProjectAction(projectId: string): Promise<FormState
   return { success: true };
 }
 
+export async function unarchiveProjectAction(projectId: string): Promise<FormState> {
+  try {
+    await apiRequest<ProjectResponse>(`${PROJECTS_PATH}/${projectId}/unarchive`, {
+      method: "POST",
+    });
+  } catch (error) {
+    return failure(toUserMessage(error));
+  }
+
+  revalidatePath(PROJECTS_PATH);
+  revalidatePath(`${PROJECTS_PATH}/${projectId}`);
+  return { success: true };
+}
+
 export async function deleteProjectAction(projectId: string): Promise<FormState> {
   try {
     await apiRequest<void>(`${PROJECTS_PATH}/${projectId}`, { method: "DELETE" });

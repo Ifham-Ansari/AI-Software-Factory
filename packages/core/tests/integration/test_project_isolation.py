@@ -94,6 +94,26 @@ class TestProjectIsolationInSql:
 
         assert await ProjectRepository(session, owner_id=stranger).archive(project.id) is None
 
+    async def test_restore_is_scoped(self, session: AsyncSession) -> None:
+        """Restoring is a write, and writes are scoped by owner like every other one.
+
+        Worth asserting separately from archiving: restore is reached through a different
+        policy (an archived project refuses ordinary writes), so it is exactly the kind of
+        exception where a scope check gets forgotten.
+        """
+        owner = await _make_user(session, "owner@example.com")
+        stranger = await _make_user(session, "stranger@example.com")
+        repository = ProjectRepository(session, owner_id=owner)
+        project = await repository.create(
+            project_id=new_project_id(), name="Mine", slug="mine", description=""
+        )
+        await repository.archive(project.id)
+
+        assert await ProjectRepository(session, owner_id=stranger).restore(project.id) is None
+        still_archived = await repository.get(project.id)
+        assert still_archived is not None
+        assert still_archived.is_archived
+
     async def test_repository_requires_a_scope(self, session: AsyncSession) -> None:
         """An unscoped repository would return every user's rows."""
         with pytest.raises(ValueError, match="owner_id"):

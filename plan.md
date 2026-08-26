@@ -343,6 +343,43 @@ render. It deliberately does not fake focus containment or inertness: a test aga
 polyfill would assert nothing but the polyfill. Those properties are verified in Playwright,
 against a real browser, where they are real.
 
+### 5.3 Archiving, and the theme (added 2026-08-26)
+
+**Archiving was a one-way door.** It fired on a single click, and nothing could bring a
+project back — so the only difference between archiving and deleting was how long it took
+to notice. Three changes, which only work together:
+
+* archiving asks for confirmation, because it changes a project to read-only;
+* `POST /projects/{id}/unarchive` returns it to `draft`, so the archive is a place things
+  come back from;
+* the list is filterable by status, and **"All" — the default — includes archived
+  projects**. If the default hid them, archiving would make a project vanish with no hint
+  that it still exists, which is the accidental-delete failure wearing a different hat.
+
+The domain rule needed a deliberate exception. `ensure_can_modify_project` refuses archived
+projects, which is correct for every write except the one that un-archives them; restoring
+therefore goes through `ensure_can_restore_project`, built on the *access* check rather than
+the *modify* check. That is the whole reason a separate policy function exists rather than a
+flag threaded through the existing one — the exception is narrow, named, and tested for
+owner scoping in its own right, because a policy reached by a different route is exactly
+where a scope check gets forgotten.
+
+Unarchiving is **not** confirmed: it is not destructive, archiving again undoes it, and a
+prompt on a safe action teaches people to dismiss prompts.
+
+**Two themes, chosen explicitly.** Dark and light, with no "system" option and no
+`prefers-color-scheme` in the stylesheet — the setting is the user's and is stored. The
+applied theme is written to `<html data-theme>` by a **blocking script in `<head>`**, before
+the first paint. React cannot do this: the server has no access to `localStorage`, so a
+theme applied during hydration arrives a frame late and every load flashes the previous
+theme. That script is also why `<html>` carries `suppressHydrationWarning`.
+
+The toggle's markup is identical in both themes — the icon is drawn by CSS from
+`html[data-theme]` — because any theme-dependent HTML would be a guaranteed hydration
+mismatch for everyone not on the default. The applied theme is read with
+`useSyncExternalStore`, not copied into component state by an effect: it genuinely lives
+outside React, and subscribing also picks up changes made in another tab.
+
 **Known limit: concurrent sockets per replica are bounded by the Redis pool.** `run_fanout`
 is created per socket, and each subscription takes a dedicated connection from a pool whose
 default `max_connections` is 10 (`REDIS__MAX_CONNECTIONS`). Beyond that, redis-py raises
@@ -761,7 +798,7 @@ Full records land in `docs/adr/` during implementation. Summary of what is alrea
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
 | 1 — Platform Foundation | **COMPLETE** | 2026-08-23 | 2026-08-24 | Email OTP verification added post-hoc; see §4.1. |
-| 2 — Secrets & Realtime | **COMPLETE** | 2026-08-24 | 2026-08-26 | 627 backend (90% cov) + 75 frontend + 24 e2e run over both fan-out states. Two-replica fan-out covered (§5.1); toasts and dialogs added (§5.2). |
+| 2 — Secrets & Realtime | **COMPLETE** | 2026-08-24 | 2026-08-26 | 638 backend (90% cov) + 91 frontend + 32 e2e run over both fan-out states. Two-replica fan-out covered (§5.1); toasts and dialogs (§5.2); archiving made reversible and themes added (§5.3). |
 | 3 — Agent Runtime & Intake | NOT STARTED | — | — | |
 | 4 — Hierarchical Supervision | NOT STARTED | — | — | |
 | 5 — Workspace & Code Gen | NOT STARTED | — | — | |

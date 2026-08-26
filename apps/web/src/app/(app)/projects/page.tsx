@@ -24,7 +24,7 @@ async function Projects({ searchParams }: PageProps) {
   if (params.status) query.set("status", params.status);
 
   const result = await apiRequest<PaginatedProjects>(`/projects?${query}`);
-  return <ProjectList projects={result.items} meta={result.meta} />;
+  return <ProjectList projects={result.items} meta={result.meta} status={params.status} />;
 }
 
 export default async function ProjectsPage({ searchParams }: PageProps) {

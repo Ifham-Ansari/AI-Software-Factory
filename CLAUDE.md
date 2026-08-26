@@ -180,7 +180,7 @@ diffable, reviewable, offline-capable, and recorded per call.
 | Phase | **2 complete** — Secure Configuration, Secrets & Realtime Backbone |
 | Next | **Phase 3 — Agent Runtime & Intake** ([plan.md](plan.md) §6) |
 | Features | **34 VERIFIED** of 127 ([features.md](features.md)) |
-| Tests | 627 backend (90% coverage) · 75 frontend · 24 e2e, run twice — all green |
+| Tests | 638 backend (90% coverage) · 91 frontend · 32 e2e, run twice — all green |
 
 **What exists.** Everything from Phase 1 — registration with email OTP verification,
 sign-in, rotating refresh tokens with theft detection, project CRUD scoped per owner, an
@@ -280,5 +280,6 @@ need. Mark the feature `BLOCKED`. An accurate blocker beats an optimistic guess.
 | 2026-08-23 | Phase 1 implemented. Status updated; event-loop constraint recorded. |
 | 2026-08-24 | Email OTP verification added to registration; sign-in refuses unverified accounts. Password minimum lowered to 8 characters; auth UI polished (password show/hide, code entry, visual pass). Test counts updated. |
 | 2026-08-24 | Phase 2 implemented: secret vault with envelope encryption, config requirements, Redis primitives, durable events with replay, ticket-authenticated WebSocket, Postgres job queue, worker claim loop, frontend realtime client. |
+| 2026-08-26 | Archiving made reversible (F-220): confirmation, `POST /projects/{id}/unarchive`, and status filtering, because an archive nothing returns from is a delete. Dark and light themes (F-219), applied before first paint by a head script; no system option by request. See [plan.md](plan.md) §5.3. |
 | 2026-08-26 | Toast and modal infrastructure added (F-217, F-218): destructive confirmation moved to the native `<dialog>` element, action outcomes announced by toast. Rules for which messages may be transient are in [plan.md](plan.md) §5.2. Fixed a latent bug where a form keyed on `state.success` stopped resetting after the first submission. |
 | 2026-08-25 | Phase 2 gap closed and a defect it exposed fixed. Redis pub/sub subscribed with a blocking `listen()` while the connection carried a 5s `socket_timeout`, so a quiet channel ended the subscription permanently — live fan-out died on every socket shortly after connecting, invisibly, because clients kept recovering by replay. Replaced with a bounded `get_message` loop. Two-replica fan-out is now tested against a real Redis (`TEST_REDIS_URL`), and the e2e suite runs as a matrix over fan-out enabled and unavailable. |
