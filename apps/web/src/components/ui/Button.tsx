@@ -1,9 +1,12 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ComponentPropsWithRef, ReactNode } from "react";
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
 type Size = "sm" | "md";
 
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+// ComponentPropsWithRef rather than ButtonHTMLAttributes so callers can hold a ref —
+// ConfirmDialog needs one to place initial focus on the safe action. In React 19 `ref` is
+// an ordinary prop for function components, so no forwardRef wrapper is required.
+interface ButtonProps extends ComponentPropsWithRef<"button"> {
   variant?: Variant;
   size?: Size;
   /** Renders a busy state and blocks further submits. */

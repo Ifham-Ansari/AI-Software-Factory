@@ -546,13 +546,6 @@ h3 {
   padding-top: var(--space-4);
   border-top: 1px solid var(--border);
 }
-.confirm-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 0.875rem;
-}
 
 .error-page {
   max-width: 32rem;
@@ -699,4 +692,163 @@ h3 {
   color: var(--success);
   font-size: 0.875rem;
   margin: 0;
+}
+
+/* ---------- Modal dialogs ---------- */
+/*
+ * The native <dialog> element. `::backdrop` is a real pseudo-element painted by the
+ * browser in the top layer, so no overlay div and no z-index arms race.
+ */
+.modal {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-raised);
+  max-width: min(32rem, calc(100vw - 2 * var(--space-4)));
+  width: 100%;
+}
+.modal::backdrop {
+  background: rgb(4 6 12 / 0.62);
+  backdrop-filter: blur(2px);
+}
+.modal-panel {
+  padding: var(--space-6);
+}
+.modal-title {
+  font-size: 1.125rem;
+  margin: 0 0 var(--space-2);
+}
+.modal-description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+.modal-body {
+  margin-top: var(--space-4);
+}
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+/* Entry is animated from the closed state via @starting-style, which needs no JS and no
+   mount/unmount dance — the dialog simply transitions when it enters the top layer. */
+@media (prefers-reduced-motion: no-preference) {
+  .modal {
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease,
+      overlay 160ms allow-discrete,
+      display 160ms allow-discrete;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  .modal:not([open]) {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  @starting-style {
+    .modal[open] {
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+    }
+  }
+}
+
+/* ---------- Toasts ---------- */
+/*
+ * Fixed to the viewport but `pointer-events: none`, so the strip never intercepts clicks
+ * meant for the page beneath it; each toast re-enables pointer events for itself.
+ */
+.toast-viewport {
+  position: fixed;
+  inset-block-end: var(--space-4);
+  inset-inline-end: var(--space-4);
+  z-index: 50;
+  pointer-events: none;
+  display: flex;
+  justify-content: flex-end;
+}
+.toast-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(24rem, calc(100vw - 2 * var(--space-4)));
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--text-muted);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-raised);
+  font-size: 0.9375rem;
+}
+.toast-success {
+  border-inline-start-color: var(--success);
+}
+.toast-error {
+  border-inline-start-color: var(--danger);
+}
+.toast-info {
+  border-inline-start-color: var(--accent);
+}
+/* Colour alone never carries the meaning: each variant also has a distinct glyph. */
+.toast-icon::before {
+  font-weight: 700;
+  line-height: 1.5;
+}
+.toast-success .toast-icon::before {
+  content: "✓";
+  color: var(--success);
+}
+.toast-error .toast-icon::before {
+  content: "!";
+  color: var(--danger);
+}
+.toast-info .toast-icon::before {
+  content: "i";
+  color: var(--accent);
+}
+.toast-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.toast-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.125rem;
+  line-height: 1;
+  padding: var(--space-1);
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+.toast-dismiss:hover {
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: toast-in 160ms ease-out;
+  }
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
 }

@@ -309,6 +309,40 @@ produced on demand.
 **The lesson worth keeping:** a component allowed to degrade silently needs a test that
 distinguishes degraded from broken, because in production those two look identical.
 
+### 5.2 Notification and dialog patterns (added 2026-08-26)
+
+Toasts and modals were added after the phase's original scope, because the flows already
+shipped needed them: a permanent delete was guarded by an inline row of buttons that
+neither contained focus nor blocked the page, and successful actions had nowhere to report
+to. Three rules govern where each is used, and they are the reason this is a decision
+rather than a component drop.
+
+**What may become a toast.** Only the confirmation of something the user just did, which
+is already finished, and which they do not need to act on. A toast disappears, so anything
+a user must read to make a decision cannot live there. Validation errors therefore stay
+inline beside the offending field, and ongoing conditions — an offline socket, a
+configuration that failed to load — stay on the page. Where a failure is announced by
+toast it is a *duplicate* of an inline alert, never a replacement, so the outcome is heard
+even when the alert is scrolled out of view.
+
+**Errors never auto-dismiss.** "Your project was not deleted" vanishing after four seconds
+is how a user comes to believe the opposite. Success messages time out; failures wait to be
+acknowledged.
+
+**Modals are the native `<dialog>` element, opened with `showModal()`.** Not a preference:
+the browser supplies focus containment, an inert background, Escape handling, restored
+focus, and the top layer. A JavaScript focus trap reimplements all of that and gets the
+edge cases wrong. The one thing we add is intercepting the `cancel` event so React state
+stays the source of truth — otherwise the browser closes the dialog behind React's back,
+leaving `open` true against a closed element that nothing can reopen. On a destructive
+confirmation, initial focus goes to **cancel**, so a stray Enter cannot delete anything.
+
+**What the tests are allowed to claim.** jsdom implements none of `<dialog>`'s behaviour —
+`showModal` is simply absent, so the Vitest setup polyfills just enough for components to
+render. It deliberately does not fake focus containment or inertness: a test against that
+polyfill would assert nothing but the polyfill. Those properties are verified in Playwright,
+against a real browser, where they are real.
+
 **Known limit: concurrent sockets per replica are bounded by the Redis pool.** `run_fanout`
 is created per socket, and each subscription takes a dedicated connection from a pool whose
 default `max_connections` is 10 (`REDIS__MAX_CONNECTIONS`). Beyond that, redis-py raises
@@ -727,7 +761,7 @@ Full records land in `docs/adr/` during implementation. Summary of what is alrea
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
 | 1 — Platform Foundation | **COMPLETE** | 2026-08-23 | 2026-08-24 | Email OTP verification added post-hoc; see §4.1. |
-| 2 — Secrets & Realtime | **COMPLETE** | 2026-08-24 | 2026-08-25 | 627 backend (90% cov) + 55 frontend + 16 e2e run over both fan-out states. Two-replica fan-out now covered; see §5.1. |
+| 2 — Secrets & Realtime | **COMPLETE** | 2026-08-24 | 2026-08-26 | 627 backend (90% cov) + 75 frontend + 24 e2e run over both fan-out states. Two-replica fan-out covered (§5.1); toasts and dialogs added (§5.2). |
 | 3 — Agent Runtime & Intake | NOT STARTED | — | — | |
 | 4 — Hierarchical Supervision | NOT STARTED | — | — | |
 | 5 — Workspace & Code Gen | NOT STARTED | — | — | |

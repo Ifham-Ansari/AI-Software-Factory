@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import type { EventResponse } from "@factory/contracts";
-import { Alert, Button } from "@/components/ui";
+import { Alert, Button, useToast } from "@/components/ui";
 import { ConnectionIndicator } from "@/features/runs/ConnectionIndicator";
 import { initialFormState } from "@/lib/actions/state";
 import { startNoopJobAction } from "@/lib/actions/runs";
@@ -19,10 +19,23 @@ interface ActivityFeedProps {
  * Handles all four states a data-displaying component must: connecting, error/offline,
  * empty, and populated. "Empty" is the interesting one here — a run with no events yet is
  * normal, not a failure, and saying so is what stops it looking broken while idle.
+ *
+ * Queueing a job is acknowledged by a toast. The work itself reports through the event
+ * stream below, so the only thing needing confirmation is that the request was accepted —
+ * which is exactly the transient, already-finished kind of message a toast is for. The
+ * offline and error notices stay inline: they describe an ongoing condition, not an
+ * event, and a condition must not scroll away on a timer.
  */
 export function ActivityFeed({ projectId, runId }: ActivityFeedProps) {
   const { events, status } = useRunEvents(runId);
   const [state, enqueue, pending] = useActionState(startNoopJobAction, initialFormState);
+  const { notify } = useToast();
+
+  // Keyed on the state object rather than a flag: queueing several jobs in a row must
+  // acknowledge each one, and `success` is `true` for all of them after the first.
+  useEffect(() => {
+    if (state.success && state.message) notify(state.message, { variant: "success" });
+  }, [state, notify]);
 
   return (
     <section className="panel activity-feed" aria-labelledby="activity-heading">
