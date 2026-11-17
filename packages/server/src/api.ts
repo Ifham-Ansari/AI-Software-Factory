@@ -1,0 +1,854 @@
+import { estimateBuild, GATES, parseStreamLine, planStats, quotaCheck, settingsSchema, type Gate, type Identity } from "@asf/core";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { z } from "zod";
+import type { CmdResult } from "./commands.ts";
+import { commitAll, git } from "./git.ts";
+import { SKILLS_SOURCE } from "./paths.ts";
+import type { Project } from "./project.ts";
+import { readRegistry } from "./registry.ts";
+import { safeJoin } from "./safe-path.ts";
+import { ServiceError } from "./service.ts";
+import type { AsfServer } from "./server.ts";
+
+type Req = FastifyRequest & { identity?: Identity; tokenProject?: string | null };
+
+function bearer(req: FastifyRequest): string | undefined {
+  const h = req.headers.authorization;
+  if (h?.startsWith("Bearer ")) return h.slice(7);
+  return undefined;
+}
+
+function sendError(reply: FastifyReply, e: unknown) {
+  if (e instanceof ServiceError) {
+    const status = e.code === 3 ? 403 : e.code === 404 ? 404 : e.code === 409 ? 409 : 400;
+    return reply.code(status).send({ error: e.message, exit: e.code === 404 || e.code === 409 ? 2 : e.code });
+  }
+  if (e instanceof z.ZodError) return reply.code(400).send({ error: e.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "), exit: 2 });
+  const msg = (e as Error)?.message ?? String(e);
+  return reply.code(400).send({ error: msg, exit: 2 });
+}
+
+export function registerApi(app: FastifyInstance, srv: AsfServer): void {
+  // ---------------------------------------------------------------------------------------- auth
+  app.addHook("onRequest", async (req: Req, reply) => {
+    // DNS-rebinding guard: only answer requests addressed to loopback.
+    const host = String(req.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+    if (!["127.0.0.1", "localhost", "::1"].includes(host)) return reply.code(421).send({ error: "asf only answers on 127.0.0.1" });
+    if (!req.url.startsWith("/api/") || req.url.startsWith("/api/health")) return;
+    const q = (req.query as Record<string, string> | undefined) ?? {};
+    const token = bearer(req) ?? (req.url.startsWith("/api/ws") ? q.token : undefined);
+    const who = srv.tokens.resolve(token);
+    if (!who) return reply.code(401).send({ error: "missing or invalid token", exit: 3 });
+    req.identity = who.identity;
+    req.tokenProject = who.projectId;
+  });
+
+  const project = (req: Req): Project => {
+    const pid = (req.params as { pid: string }).pid;
+    if (req.tokenProject && req.tokenProject !== pid) throw new ServiceError("token is not valid for this project", 3);
+    const p = srv.projects.get(pid);
+    if (!p) throw new ServiceError(`unknown project ${pid}`, 404);
+    return p;
+  };
+  const human = (req: Req): void => {
+    if (req.identity?.kind !== "human") throw new ServiceError("owner token required", 3);
+  };
+  const wrap =
+    (fn: (req: Req, reply: FastifyReply) => unknown) =>
+    async (req: Req, reply: FastifyReply) => {
+      try {
+        const out = await fn(req, reply);
+        if (reply.sent) return;
+        return out ?? { ok: true };
+      } catch (e) {
+        return sendError(reply, e);
+      }
+    };
+
+  app.get("/api/health", async () => ({ ok: true, name: "asf", version: "0.1.0", build: srv.build, pid: process.pid }));
+
+  // `asf up` restarts a server that is older than the code on disk (after an update), but never under
+  // working agents unless asked.
+  app.post(
+    "/api/shutdown",
+    wrap((req, reply) => {
+      human(req);
+      const ifIdle = Boolean((req.body as { ifIdle?: boolean } | undefined)?.ifIdle);
+      const working = [...srv.projects.values()].reduce((n, p) => n + p.orch.activeRuns().length, 0);
+      if (ifIdle && working > 0) return reply.code(409).send({ error: `${working} agent run(s) are working`, working });
+      setTimeout(() => void srv.requestShutdown(), 50);
+      return { ok: true };
+    }),
+  );
+
+  // ------------------------------------------------------------------------------------ projects
+  app.get(
+    "/api/projects",
+    wrap((req) => {
+      human(req);
+      return readRegistry().map((e) => {
+        const p = srv.projects.get(e.id);
+        return { ...e, open: Boolean(p), phase: p?.svc.phase ?? null, exists: fs.existsSync(path.join(e.root, ".asf")) };
+      });
+    }),
+  );
+
+  app.post(
+    "/api/projects",
+    wrap(async (req) => {
+      human(req);
+      const body = z.object({ root: z.string().min(1), init: z.boolean().optional(), existing: z.boolean().optional() }).parse(req.body);
+      if (!path.isAbsolute(body.root)) throw new ServiceError("choose an absolute folder path", 2);
+      const p = await srv.openProject(path.resolve(body.root), { init: body.init });
+      if (body.existing !== undefined && p.svc.phase === "idea") p.svc.updateSettings({ existing: body.existing });
+      return { id: p.id, name: p.paths.name, root: p.paths.root };
+    }),
+  );
+
+  // --------------------------------------------------------------------- folder picker (owner only)
+  // The owner picks where AI Software Factory puts a project. Directories only; nothing is read from files.
+  app.get(
+    "/api/fs/home",
+    wrap((req) => {
+      human(req);
+      const roots =
+        process.platform === "win32"
+          ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((l) => `${l}:\\`).filter((d) => fs.existsSync(d))
+          : ["/"];
+      const launch = srv.launchDir;
+      return {
+        home: os.homedir(),
+        sep: path.sep,
+        roots,
+        launchDir: launch,
+        launchIsProject: Boolean(launch && fs.existsSync(path.join(launch, ".asf", "config.yaml"))),
+      };
+    }),
+  );
+  app.get(
+    "/api/fs/list",
+    wrap((req) => {
+      human(req);
+      const raw = String((req.query as { path?: string }).path ?? "") || os.homedir();
+      if (!path.isAbsolute(raw)) throw new ServiceError("path must be absolute", 2);
+      const dir = path.resolve(raw);
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new ServiceError(`not a folder: ${dir}`, 404);
+      let names: fs.Dirent[];
+      try {
+        names = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        throw new ServiceError(`cannot read ${dir}`, 3);
+      }
+      const entries = names
+        .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !e.name.startsWith("$") && e.name !== "node_modules")
+        .map((e) => {
+          const full = path.join(dir, e.name);
+          let hasFiles = false;
+          try {
+            hasFiles = fs.readdirSync(full).some((n) => !n.startsWith("."));
+          } catch {
+            /* unreadable */
+          }
+          return { name: e.name, path: full, isAsf: fs.existsSync(path.join(full, ".asf", "config.yaml")), isGit: fs.existsSync(path.join(full, ".git")), hasFiles };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+      const parent = path.dirname(dir);
+      return { path: dir, parent: parent === dir ? null : parent, entries, isAsf: fs.existsSync(path.join(dir, ".asf", "config.yaml")), hasFiles: names.some((n) => !n.name.startsWith(".")) };
+    }),
+  );
+  app.post(
+    "/api/fs/mkdir",
+    wrap((req) => {
+      human(req);
+      const target = z.object({ path: z.string().min(1) }).parse(req.body).path;
+      if (!path.isAbsolute(target)) throw new ServiceError("path must be absolute", 2);
+      const full = path.resolve(target);
+      const name = path.basename(full);
+      if (!name || /[<>:"|?*]/.test(name) || name.startsWith(".")) throw new ServiceError("choose a plain folder name", 2);
+      if (!fs.existsSync(path.dirname(full))) throw new ServiceError("the parent folder does not exist", 2);
+      if (fs.existsSync(full)) throw new ServiceError("that folder already exists", 409);
+      fs.mkdirSync(full);
+      return { path: full };
+    }),
+  );
+  app.post(
+    "/api/launch",
+    wrap((req) => {
+      human(req);
+      const dir = z.object({ dir: z.string().min(1) }).parse(req.body).dir;
+      srv.launchDir = path.resolve(dir);
+      return { ok: true };
+    }),
+  );
+
+  // ------------------------------------------------------------------------- agent CLI commands
+  app.post(
+    "/api/projects/:pid/cmd/:name",
+    wrap(async (req) => {
+      const p = project(req);
+      const name = (req.params as { name: string }).name;
+      const b = (req.body ?? {}) as Record<string, any>;
+      const id = req.identity!;
+      const c = p.cmds;
+      const s = (k: string) => (b[k] === undefined || b[k] === null ? "" : String(b[k]));
+      let r: CmdResult;
+      switch (name) {
+        case "whoami":
+          r = c.whoami(id);
+          break;
+        case "task.show":
+          r = c.taskShow(id, s("task"));
+          break;
+        case "task.list":
+          r = c.taskList(id, { ready: Boolean(b.ready), role: b.role, status: b.status });
+          break;
+        case "task.start":
+          r = c.taskStart(id, s("task"));
+          break;
+        case "task.block":
+          r = c.taskBlock(id, s("task"), s("on"), s("reason"));
+          break;
+        case "task.unblock":
+          r = c.taskUnblock(id, s("task"));
+          break;
+        case "task.done":
+          r = await c.taskDone(id, s("task"), s("status"), b.handoff ?? null);
+          break;
+        case "progress":
+          r = c.progress(id, s("text"));
+          break;
+        case "msg":
+          r = c.msg(id, s("to"), s("body"));
+          break;
+        case "ask":
+          r = c.ask(id, s("to"), b.body ?? null, b.batch ?? null);
+          break;
+        case "inbox":
+          r = c.inbox(id, Boolean(b.all));
+          break;
+        case "reply":
+          r = await c.reply(id, s("id"), s("body"));
+          break;
+        case "decision":
+          r = c.decision(id, s("title"), s("why"), Array.isArray(b.affects) ? b.affects : []);
+          break;
+        case "lesson":
+          r = c.lesson(id, s("text"), Array.isArray(b.roles) ? b.roles : [], Array.isArray(b.paths) ? b.paths : []);
+          break;
+        case "decision.list":
+          r = c.decisionList(id);
+          break;
+        case "decision.show":
+          r = c.decisionShow(id, s("id"));
+          break;
+        case "doc.list":
+          r = c.docList(id);
+          break;
+        case "doc.show":
+          r = c.docShow(id, s("name"));
+          break;
+        case "doc.submit":
+          r = await c.docSubmit(id, s("name"), s("content"), b.file ?? null);
+          break;
+        case "plan.check":
+          r = await c.planCheck(id, b.files ?? []);
+          break;
+        case "plan.submit":
+          r = await c.planSubmit(id, b.files ?? [], b.summary ?? null);
+          break;
+        case "review.start":
+          r = c.reviewStart(id, s("task"));
+          break;
+        case "review.comment":
+          r = c.reviewComment(id, s("task"), { file: b.file, line: b.line ? Number(b.line) : undefined, severity: s("severity") || "minor", body: s("body") });
+          break;
+        case "review.approve":
+          r = c.reviewApprove(id, s("task"), s("summary"));
+          break;
+        case "review.request-changes":
+          r = c.reviewRequestChanges(id, s("task"), s("summary"), b.content ?? null);
+          break;
+        case "qa.pass":
+          r = await c.qaPass(id, s("task"), s("report"));
+          break;
+        case "qa.fail":
+          r = c.qaFail(id, s("task"), s("report"));
+          break;
+        case "bug.create":
+          r = c.bugCreate(id, { task: s("task"), severity: s("severity"), title: s("title"), content: s("content") });
+          break;
+        default:
+          throw new ServiceError(`unknown command ${name}`, 2);
+      }
+      return { ok: !r.exit, text: r.text, data: r.data ?? null, exit: r.exit ?? 0 };
+    }),
+  );
+
+  app.post(
+    "/api/projects/:pid/guard-block",
+    wrap((req) => {
+      const p = project(req);
+      const b = (req.body ?? {}) as { tool?: string; reason?: string; target?: string };
+      const id = req.identity!;
+      const actor = id.kind === "agent" ? id.agent : "human";
+      p.svc.emit("guard.blocked", `Guard blocked ${actor}: ${b.reason ?? b.tool}`, { tool: b.tool, target: b.target ?? null }, {
+        actor,
+        role: id.kind === "agent" ? id.role : null,
+        task: id.kind === "agent" ? id.task : null,
+        run: id.kind === "agent" ? id.runId : null,
+      });
+      return { ok: true };
+    }),
+  );
+
+  // ----------------------------------------------------------------------------- dashboard reads
+  app.get(
+    "/api/projects/:pid",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const proj = p.svc.project();
+      const quota = quotaCheck(proj.settings, { usedToday: p.svc.usedToday(), limitedUntil: proj.state.limitedUntil ?? null });
+      const counts: Record<string, number> = {};
+      for (const t of p.svc.tasks({ kind: ["build", "integrate", "release"] })) counts[t.status] = (counts[t.status] ?? 0) + 1;
+      return {
+        id: p.id,
+        ...proj,
+        quota: { ...quota, allowance: Number.isFinite(quota.allowance) ? quota.allowance : null, usedToday: p.svc.usedToday() },
+        counts,
+        activeRuns: p.orch.activeRuns().length,
+        openQuestions: p.svc.questions("open").filter((q) => q.to_addr === "@human").length,
+        previewUrl: p.orch.previewUrl(),
+        activeChange: p.orch.activeChange(),
+        roles: p.roles.roles,
+        defaultStack: p.roles.default_stack,
+      };
+    }),
+  );
+
+  app.patch(
+    "/api/projects/:pid/settings",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const patch = settingsSchema.partial().parse(req.body);
+      return p.svc.updateSettings(patch);
+    }),
+  );
+
+  app.post(
+    "/api/projects/:pid/idea",
+    wrap(async (req) => {
+      human(req);
+      const p = project(req);
+      const b = z
+        .object({
+          text: z.string().min(3).max(50_000),
+          stakes: z.string().max(200).optional(),
+          links: z.array(z.string().max(2000)).max(50).optional(),
+          attachments: z.array(z.object({ name: z.string().max(200), data: z.string().max(14_000_000) })).max(20).optional(),
+          kind: z.enum(["new", "feature", "fix"]).optional(),
+          track: z.enum(["auto", "quick", "standard", "full"]).optional(),
+        })
+        .parse(req.body);
+      await p.orch.submitIdea(b);
+      return { ok: true };
+    }),
+  );
+  app.post(
+    "/api/projects/:pid/cancel",
+    wrap(async (req) => {
+      human(req);
+      await project(req).orch.cancelCurrentWork();
+      return { ok: true };
+    }),
+  );
+
+  // ------------------------------------------------------------------------- change requests
+  app.get("/api/projects/:pid/changes", wrap((req) => (human(req), project(req).orch.changes())));
+  app.get("/api/projects/:pid/needs-you", wrap((req) => (human(req), project(req).orch.needsYou())));
+  app.post(
+    "/api/projects/:pid/changes",
+    wrap(async (req) => {
+      human(req);
+      const b = z
+        .object({
+          text: z.string().min(3).max(20_000),
+          attachments: z.array(z.object({ name: z.string().max(200), data: z.string().max(14_000_000) })).max(10).optional(),
+        })
+        .parse(req.body);
+      const cr = await project(req).orch.requestChange(b.text, b.attachments ?? []);
+      return { id: cr.id };
+    }),
+  );
+  app.post(
+    "/api/projects/:pid/changes/:cid/cancel",
+    wrap((req) => {
+      human(req);
+      project(req).orch.cancelChange((req.params as { cid: string }).cid);
+      return { ok: true };
+    }),
+  );
+
+  app.get(
+    "/api/projects/:pid/tasks",
+    wrap((req) => {
+      human(req);
+      return project(req)
+        .svc.tasks()
+        .map(({ source: _s, ...t }) => ({ ...t, bugs: 0 }))
+        .map((t) => ({ ...t, bugs: project(req).svc.bugs(t.id, "open").length }));
+    }),
+  );
+
+  app.get(
+    "/api/projects/:pid/tasks/:id",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const id = (req.params as { id: string }).id;
+      const t = p.svc.mustTask(id);
+      return {
+        task: t,
+        reviews: p.svc.reviews(id),
+        bugs: p.svc.bugs(id),
+        handoffs: p.svc.handoffs(id),
+        qa: p.svc.qaReports(id),
+        messages: p.svc.messages({ task: id }),
+        runs: p.svc.runs({ task: id }),
+        events: p.svc.events({ task: id, limit: 400 }),
+      };
+    }),
+  );
+
+  app.get(
+    "/api/projects/:pid/tasks/:id/diff",
+    wrap(async (req) => {
+      human(req);
+      const p = project(req);
+      const t = p.svc.mustTask((req.params as { id: string }).id);
+      if (p.direct) {
+        const d = p.orch.taskDiff(t);
+        return { diff: d.diff.slice(0, 2_000_000), files: d.files, base: "start of task", head: "now" };
+      }
+      if (!t.base_sha || !t.branch) return { diff: "" };
+      const r = await git(p.paths.root, ["diff", "--no-color", `${t.base_sha}...${t.head_sha ?? t.branch}`], { reject: false });
+      return { diff: r.stdout.slice(0, 2_000_000), base: t.base_sha, head: t.head_sha ?? t.branch };
+    }),
+  );
+
+  app.post(
+    "/api/projects/:pid/tasks/:id/:action",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const { id, action } = req.params as { id: string; action: string };
+      const t = p.svc.mustTask(id);
+      switch (action) {
+        case "unblock":
+          p.svc.setStatus(id, t.meta.resumeStatus ?? (t.kind === "release" ? "ready" : "in_progress"), {
+            force: true,
+            actor: "human",
+            reason: "unblocked by owner",
+            extra: { hold: null, blocked_on: null, blocked_reason: null, run_failures: 0, verify_failures: 0 },
+          });
+          break;
+        case "hold":
+          p.svc.updateTask(id, { hold: "paused" });
+          break;
+        case "release":
+          p.orch.resumeTask(id);
+          break;
+        default:
+          throw new ServiceError(`unknown action ${action}`, 2);
+      }
+      void p.orch.tick();
+      return { ok: true };
+    }),
+  );
+
+  app.get("/api/projects/:pid/docs", wrap((req) => (human(req), project(req).svc.docs())));
+  app.get(
+    "/api/projects/:pid/docs/*",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const name = (req.params as { "*": string })["*"];
+      const m = /^(.*)\/versions\/(\d+)$/.exec(name);
+      if (m) {
+        const v = p.svc.docVersion(m[1]!, Number(m[2]));
+        if (!v) throw new ServiceError("no such version", 404);
+        return v;
+      }
+      const d = p.svc.doc(name);
+      if (!d) throw new ServiceError(`unknown document ${name}`, 404);
+      return d;
+    }),
+  );
+  app.post(
+    "/api/projects/:pid/docs-comment",
+    wrap((req) => {
+      human(req);
+      const b = z.object({ doc: z.string(), body: z.string().min(1).max(10_000), anchor: z.string().max(500).nullable().optional() }).parse(req.body);
+      project(req).svc.commentDoc(b.doc, b.body, b.anchor ?? null);
+      return { ok: true };
+    }),
+  );
+
+  app.post(
+    "/api/projects/:pid/gates/:gate/:decision",
+    wrap(async (req) => {
+      human(req);
+      const p = project(req);
+      const { gate, decision } = req.params as { gate: string; decision: string };
+      if (!(GATES as readonly string[]).includes(gate)) throw new ServiceError(`unknown gate ${gate}`, 2);
+      const b = z.object({ comment: z.string().max(20_000).optional(), team: z.record(z.string(), z.number().int().min(0).max(16)).optional() }).parse(req.body ?? {});
+      if (decision === "approve") await p.orch.approve(gate as Gate, b.comment ?? null, "human", b.team);
+      else if (decision === "request-changes") {
+        if (!b.comment?.trim()) throw new ServiceError("a comment is required when requesting changes", 2);
+        await p.orch.requestChanges(gate as Gate, b.comment);
+      } else throw new ServiceError(`unknown decision ${decision}`, 2);
+      return { ok: true };
+    }),
+  );
+
+  app.get(
+    "/api/projects/:pid/questions",
+    wrap((req) => {
+      human(req);
+      const st = (req.query as { status?: string }).status;
+      return project(req).svc.questions(st);
+    }),
+  );
+  app.post(
+    "/api/projects/:pid/questions/:qid/answer",
+    wrap(async (req) => {
+      human(req);
+      const b = z.object({ answer: z.unknown() }).parse(req.body);
+      return project(req).cmds.answerQuestion(req.identity!, (req.params as { qid: string }).qid, b.answer);
+    }),
+  );
+
+  app.get("/api/projects/:pid/messages", wrap((req) => (human(req), project(req).svc.messages({ limit: 500 }))));
+  app.post(
+    "/api/projects/:pid/messages",
+    wrap((req) => {
+      human(req);
+      const b = z.object({ to: z.string(), body: z.string().min(1).max(10_000) }).parse(req.body);
+      return project(req).cmds.msg(req.identity!, b.to, b.body);
+    }),
+  );
+  app.get("/api/projects/:pid/decisions", wrap((req) => (human(req), project(req).svc.decisions())));
+
+  // ------------------------------------------------------------------------------ learning memory
+  const lessonBody = z.object({
+    text: z.string().min(1).max(300).optional(),
+    roles: z.array(z.string()).max(9).optional(),
+    paths: z.array(z.string().max(200)).max(20).optional(),
+    pinned: z.boolean().optional(),
+  });
+  app.get("/api/projects/:pid/lessons", wrap((req) => (human(req), project(req).svc.lessons())));
+  app.post(
+    "/api/projects/:pid/lessons",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const b = lessonBody.parse(req.body);
+      if (!b.text) throw new ServiceError("text is required", 2);
+      const l = p.svc.addLesson({ text: b.text, roles: b.roles, paths: b.paths, pinned: b.pinned, source: "you", by: "human" });
+      p.writeMemoryFile();
+      return l;
+    }),
+  );
+  app.patch(
+    "/api/projects/:pid/lessons/:lid",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      p.svc.updateLesson(Number((req.params as { lid: string }).lid), lessonBody.parse(req.body));
+      p.writeMemoryFile();
+      return { ok: true };
+    }),
+  );
+  app.delete(
+    "/api/projects/:pid/lessons/:lid",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      p.svc.deleteLesson(Number((req.params as { lid: string }).lid));
+      p.writeMemoryFile();
+      return { ok: true };
+    }),
+  );
+
+  app.get(
+    "/api/projects/:pid/agents",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const active = new Map(p.orch.activeRuns().map((r) => [r.agent, r]));
+      return p.svc.agents().map((a) => {
+        const r = a.current_run ? p.svc.run(a.current_run) : null;
+        const tokens = r ? Number(r.input_tokens) + Number(r.output_tokens) + Number(r.cache_creation_tokens) : 0;
+        return { ...a, active: active.has(a.id), run: r, tokens };
+      });
+    }),
+  );
+  app.get("/api/projects/:pid/runs", wrap((req) => (human(req), project(req).svc.runs({ limit: 300 }))));
+  app.get(
+    "/api/projects/:pid/runs/:rid/stream",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const rid = (req.params as { rid: string }).rid;
+      if (!/^R-\d+$/.test(rid)) throw new ServiceError("bad run id", 2);
+      const f = path.join(p.paths.run(rid), "stream.jsonl");
+      if (!fs.existsSync(f)) return { lines: [] };
+      const text = fs.readFileSync(f, "utf8");
+      return { lines: text.split("\n").filter(Boolean).slice(-400) };
+    }),
+  );
+  app.get(
+    "/api/projects/:pid/runs/:rid/transcript",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const rid = (req.params as { rid: string }).rid;
+      if (!/^R-\d+$/.test(rid)) throw new ServiceError("bad run id", 2);
+      const run = p.svc.run(rid);
+      if (!run) throw new ServiceError("unknown run", 404);
+      const f = path.join(p.paths.run(rid), "stream.jsonl");
+      const items: Record<string, unknown>[] = [];
+      if (fs.existsSync(f)) {
+        for (const line of fs.readFileSync(f, "utf8").split("\n")) {
+          for (const ev of parseStreamLine(line)) {
+            if (ev.kind === "init") items.push({ kind: "init", text: ev.model ?? "" });
+            else if (ev.kind === "text") items.push({ kind: "text", text: ev.text });
+            else if (ev.kind === "tool") {
+              // Same relative paths as the live run.tool events.
+              const rel = (f: unknown) => {
+                if (typeof f !== "string" || !path.isAbsolute(f) || !run.cwd) return f;
+                const r = path.relative(String(run.cwd), f);
+                return r.startsWith("..") || path.isAbsolute(r) ? f : r.split(path.sep).join("/");
+              };
+              const file = rel(ev.file ?? null) as string | null;
+              const input = ev.input.file_path ? { ...ev.input, file_path: rel(ev.input.file_path) } : ev.input;
+              const text = ev.file && file && file !== ev.file ? ev.summary.replace(ev.file, file) : ev.summary;
+              items.push({ kind: "tool", tool: ev.tool, file, input, toolUseId: ev.toolUseId ?? null, text });
+            }
+            else if (ev.kind === "tool_result") items.push({ kind: "result", toolUseId: ev.toolUseId ?? null, isError: ev.isError, text: ev.text });
+            else if (ev.kind === "result") items.push({ kind: "final", isError: ev.isError, text: ev.text });
+          }
+        }
+      }
+      return { run, items: items.slice(-1500) };
+    }),
+  );
+  // Notifications are the events that carry data.notify (questions, approvals, blocked/finished tasks, alerts).
+  app.get(
+    "/api/projects/:pid/notifications",
+    wrap((req) => {
+      human(req);
+      const q = req.query as { after?: string; limit?: string };
+      return project(req).svc.events({ notify: true, after: q.after ? Number(q.after) : undefined, limit: q.limit ? Number(q.limit) : 200 });
+    }),
+  );
+  app.get(
+    "/api/projects/:pid/events",
+    wrap((req) => {
+      human(req);
+      const q = req.query as { after?: string; task?: string; limit?: string; types?: string; run?: string };
+      return project(req).svc.events({
+        after: q.after ? Number(q.after) : undefined,
+        task: q.task,
+        run: q.run,
+        limit: q.limit ? Number(q.limit) : 1000,
+        types: q.types ? q.types.split(",") : undefined,
+      });
+    }),
+  );
+  app.get(
+    "/api/projects/:pid/usage",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const u = p.svc.usage(7);
+      return { ...u, limits: p.svc.events({ types: ["quota.*"], limit: 50 }), settings: { daily_token_budget: p.svc.settings.daily_token_budget, reserve_percent: p.svc.settings.reserve_percent } };
+    }),
+  );
+
+  app.get(
+    "/api/projects/:pid/plan",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const tasks = p.svc.tasks({ kind: ["build"] });
+      const stats = tasks.length ? planStats(tasks) : null;
+      const est = estimateBuild(stats?.byRole ?? {}, p.svc.avgTokensByRole(), p.svc.settings.qa_per_task);
+      return { tasks: tasks.map(({ source: _s, body: _b, ...t }) => t), stats, estimate: est, team: p.svc.settings.team };
+    }),
+  );
+
+  // -------------------------------------------------------------------------------- controls
+  app.post(
+    "/api/projects/:pid/control/:action",
+    wrap(async (req) => {
+      human(req);
+      const p = project(req);
+      const action = (req.params as { action: string }).action;
+      if (action === "pause") p.orch.pause();
+      else if (action === "resume") p.orch.resume();
+      else if (action === "kill") return { killed: await p.orch.killAll() };
+      else if (action === "dismiss-alert") p.svc.dismissAlert(Number((req.body as { id?: number })?.id));
+      else throw new ServiceError(`unknown action ${action}`, 2);
+      return { ok: true };
+    }),
+  );
+  app.post(
+    "/api/projects/:pid/agents/:agent/:action",
+    wrap(async (req) => {
+      human(req);
+      const p = project(req);
+      const { agent, action } = req.params as { agent: string; action: string };
+      if (action === "kill" || action === "pause") await p.orch.killAgent(agent, action);
+      else if (action === "resume") {
+        for (const t of p.svc.tasks()) if (t.hold === "paused" && t.assignee === agent) p.orch.resumeTask(t.id);
+      } else throw new ServiceError(`unknown action ${action}`, 2);
+      return { ok: true };
+    }),
+  );
+  app.post(
+    "/api/projects/:pid/preview/:action",
+    wrap(async (req) => {
+      human(req);
+      const action = (req.params as { action: string }).action;
+      if (!["start", "stop", "reset"].includes(action)) throw new ServiceError("unknown preview action", 2);
+      return project(req).orch.preview(action as "start" | "stop" | "reset");
+    }),
+  );
+  app.get(
+    "/api/projects/:pid/preview",
+    wrap(async (req) => {
+      human(req);
+      const p = project(req);
+      const plan = await p.orch.previewPlan();
+      return { ...p.orch.previewer.get(), plan };
+    }),
+  );
+
+  // ---------------------------------------------------------------------------------- design
+  app.get(
+    "/api/projects/:pid/design",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const base = path.join(p.sharedDir(), ".asf/docs");
+      // Mockups and specs anywhere under design/ (designers do not always use design/screens/), except the
+      // direction previews and the design system file. Paths are relative to design/.
+      const designDir = path.join(base, "design");
+      const screens: string[] = [];
+      const walk = (dir: string, rel: string) => {
+        if (!fs.existsSync(dir)) return;
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          const r = rel ? `${rel}/${e.name}` : e.name;
+          if (e.isDirectory() && e.name !== "directions") walk(path.join(dir, e.name), r);
+          else if (e.isFile() && /\.(html|md)$/i.test(e.name) && !/^DESIGN\.md$/i.test(r)) screens.push(r);
+        }
+      };
+      walk(designDir, "");
+      // HTML mockups first, so the review opens on something to look at.
+      screens.sort((a, b) => Number(b.endsWith(".html")) - Number(a.endsWith(".html")) || a.localeCompare(b));
+      const tokensFile = path.join(base, "contracts/design-tokens.json");
+      let tokens: unknown;
+      try {
+        tokens = fs.existsSync(tokensFile) ? JSON.parse(fs.readFileSync(tokensFile, "utf8")) : null;
+      } catch {
+        tokens = null;
+      }
+      const directions = p.svc.questions().filter((q) => q.kind === "batch" && p.svc.task(q.task ?? "")?.mode === "direction");
+      const dirsDir = path.join(base, "design/directions");
+      const directionPreviews = fs.existsSync(dirsDir) ? fs.readdirSync(dirsDir).filter((f) => /\.html$/.test(f)).sort() : [];
+      return { choice: p.svc.state.designChoice ?? null, directions, tokens, screens, directionPreviews };
+    }),
+  );
+  app.get(
+    "/api/projects/:pid/design/screen",
+    wrap((req, reply) => {
+      human(req);
+      const p = project(req);
+      const q = req.query as { name?: string; dir?: string };
+      const name = q.name ?? "";
+      if (!/^[A-Za-z0-9._\-/]+\.(html|md)$/.test(name) || name.split("/").includes("..")) throw new ServiceError("bad screen name", 2);
+      const design = path.join(p.sharedDir(), ".asf/docs/design");
+      // Paths are relative to design/; older clients send bare names from design/screens/.
+      const candidates = q.dir === "directions" ? [safeJoin(path.join(design, "directions"), name)] : [safeJoin(design, name), safeJoin(path.join(design, "screens"), name)];
+      const f = candidates.find((c) => c && fs.existsSync(c) && fs.statSync(c).isFile());
+      if (!f) throw new ServiceError("not found", 404);
+      // Served as text and rendered by the dashboard in a sandboxed iframe (srcdoc, no allow-same-origin).
+      return reply.header("content-type", "text/plain; charset=utf-8").header("content-security-policy", "sandbox").send(fs.readFileSync(f, "utf8"));
+    }),
+  );
+
+  // ---------------------------------------------------------------------------------- skills
+  const skillsBase = (p: Project) => p.skillsDir();
+  const listFiles = (dir: string, prefix = ""): string[] =>
+    fs.existsSync(dir)
+      ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? listFiles(path.join(dir, e.name), `${prefix}${e.name}/`) : e.isFile() ? [`${prefix}${e.name}`] : []))
+      : [];
+  app.get(
+    "/api/projects/:pid/skills",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const files = listFiles(skillsBase(p));
+      return { files, roles: Object.fromEntries(Object.entries(p.roles.roles).map(([k, v]) => [k, v.skills])) };
+    }),
+  );
+  app.get(
+    "/api/projects/:pid/skills/file",
+    wrap((req) => {
+      human(req);
+      const p = project(req);
+      const rel = (req.query as { path?: string }).path ?? "";
+      const f = safeJoin(skillsBase(p), rel);
+      if (!f || !fs.existsSync(f) || !fs.statSync(f).isFile()) throw new ServiceError("not found", 404);
+      const def = safeJoin(SKILLS_SOURCE, rel);
+      const original = def && fs.existsSync(def) ? fs.readFileSync(def, "utf8") : null;
+      const content = fs.readFileSync(f, "utf8");
+      return { path: rel, content, modified: original !== null && original !== content, hasDefault: original !== null };
+    }),
+  );
+  app.put(
+    "/api/projects/:pid/skills/file",
+    wrap(async (req) => {
+      human(req);
+      const p = project(req);
+      const b = z.object({ path: z.string().regex(/^[A-Za-z0-9._\-/]+\.(md|json|yaml|yml|txt)$|Makefile$|env\.example$/), content: z.string().max(400_000) }).parse(req.body);
+      const f = safeJoin(p.editableSkillsDir(), b.path);
+      if (!f) throw new ServiceError("invalid path", 2);
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, b.content);
+      if (!p.direct) await commitAll(p.paths.integration, `asf: owner edited skill ${b.path}`, ["-A", "--", ".asf/skills"]);
+      p.svc.emit("skills.updated", `Owner edited skill file ${b.path}`, { path: b.path }, { actor: "human" });
+      return { ok: true };
+    }),
+  );
+  app.post(
+    "/api/projects/:pid/skills/reset",
+    wrap(async (req) => {
+      human(req);
+      const p = project(req);
+      const rel = z.object({ path: z.string() }).parse(req.body).path;
+      const src = safeJoin(SKILLS_SOURCE, rel);
+      const dst = safeJoin(p.editableSkillsDir(), rel);
+      if (!src || !dst || !fs.existsSync(src)) throw new ServiceError("no default for that file", 404);
+      fs.copyFileSync(src, dst);
+      if (!p.direct) await commitAll(p.paths.integration, `asf: reset skill ${rel} to default`, ["-A", "--", ".asf/skills"]);
+      p.svc.emit("skills.updated", `Owner reset ${rel} to the default`, { path: rel }, { actor: "human" });
+      return { ok: true };
+    }),
+  );
+}

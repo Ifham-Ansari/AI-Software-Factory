@@ -1,70 +1,12 @@
-# ---- Secrets & environment ----
-# Nothing containing a credential may ever be committed. .env.example is the only exception.
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.p12
-# Anchored to the repository root on purpose. Unanchored, `secrets/` matches a directory
-# of that name at ANY depth — which silently excluded
-# packages/core/src/factory_core/application/secrets/, so the entire vault implementation
-# was absent from the repo and CI failed on an import it could not resolve. A source
-# package is not a credential store just because of its name, and an ignore rule that
-# quietly swallows source is worse than no rule: credentials are caught by content and
-# extension above (.env, *.pem, *.key, *.p12), which is where that protection belongs.
-/secrets/
-/credentials/
-
-# ---- Python ----
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-coverage.xml
-htmlcov/
-dist/
-build/
-
-# ---- Node / Next.js ----
 node_modules/
-.next/
-out/
-.turbo/
-*.tsbuildinfo
-.pnpm-store/
+dist/
 coverage/
-playwright-report/
-test-results/
-blob-report/
-
-# ---- Generated project output ----
-# Code the factory produces lives in disposable workspaces, never in this repo.
-workspaces/
-generated/
-artifacts/
-
-# ---- Local infrastructure ----
-*.sqlite3
-*.db
-docker-compose.override.yml
-.langgraph_api/
-
-# ---- Editors & OS ----
-.vscode/
-!.vscode/extensions.json
-.idea/
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# ---- Logs & scratch ----
 *.log
-logs/
-tmp/
-.scratch/
+.DS_Store
+packages/dashboard/test-results/
+packages/dashboard/playwright-report/
+.asf-test-*/
+.env
+
+# Local AI Software Factory project data (if you run asf inside this repo)
+.asf/

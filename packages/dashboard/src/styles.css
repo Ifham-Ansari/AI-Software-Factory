@@ -1,0 +1,724 @@
+@import "tailwindcss";
+
+/* AI Software Factory dashboard: "graphite & aurora".
+   A tinted graphite frame holds the navigation and the workspace sits in an inset panel on top of it. Teal is the
+   one brand signal (primary actions, focus, progress); every role keeps its own signal colour. Light mode is cool
+   paper, dark mode is deep graphite. All colours are tokens below, so a re-theme is a token edit. */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  /* Brand */
+  --brand-1: #0d9488;
+  --brand-2: #0891b2;
+  --brand-grad: linear-gradient(135deg, #0c8277 0%, #0b6f8c 100%);
+  --brand-ink: #ffffff;
+
+  /* Surfaces: chrome (frame) < paper (workspace) < surface (cards) */
+  --chrome: #e9eceb;
+  --paper: #f7f8f8;
+  --surface: #ffffff;
+  --sunken: #f0f2f2;
+  --rule: #e1e5e5;
+  --rule-strong: #c9cfd0;
+
+  /* Text */
+  --ink: #0b1314;
+  --ink-2: #3c4749;
+  --ink-3: #5d696c;
+
+  /* Signals */
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --accent-soft: #e2f4f0;
+  --focus: #0d9488;
+  --danger: #c4321f;
+  --danger-ink: #ffffff;
+  --danger-soft: #fdece9;
+  --ok: #2f7d1f;
+  --ok-soft: #e7f4e1;
+  --warn: #8f5f00;
+  --warn-soft: #fbf1d5;
+  --highlight: #fff4c0;
+
+  --radius: 10px;
+  --radius-sm: 7px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgb(11 19 20 / 0.06);
+  --shadow-md: 0 10px 24px -10px rgb(11 19 20 / 0.14), 0 2px 6px -2px rgb(11 19 20 / 0.06);
+  --shadow-lg: 0 32px 72px -20px rgb(11 19 20 / 0.36), 0 0 0 1px rgb(11 19 20 / 0.04);
+
+  /* Role signal colours (text-safe on paper and surface, AA). */
+  --role-pm: #a8325a;
+  --role-tech-lead: #234f8f;
+  --role-designer: #9a4a1f;
+  --role-backend: #1f6e4c;
+  --role-frontend: #0b6875;
+  --role-qa: #7d5a00;
+  --role-reviewer: #5a4b9c;
+  --role-devops: #4c5d1f;
+  --role-security: #b02a20;
+  --role-human: #0b1314;
+  --role-system: #5d696c;
+
+  /* Board status colours. */
+  --st-todo: #8b9597;
+  --st-ready: #2f6bff;
+  --st-in_progress: #c27c0e;
+  --st-blocked: #d83a34;
+  --st-review: #7c4dff;
+  --st-changes_requested: #e0681d;
+  --st-qa: #0891b2;
+  --st-done: #2f9d4a;
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --brand-grad: linear-gradient(135deg, #2dd4bf 0%, #22c3e6 100%);
+  --brand-ink: #032523;
+
+  --chrome: #060909;
+  --paper: #0b0f10;
+  --surface: #111618;
+  --sunken: #0d1213;
+  --rule: #1e2629;
+  --rule-strong: #2d373a;
+
+  --ink: #e6eded;
+  --ink-2: #a8b4b6;
+  --ink-3: #7d8b8e;
+
+  --accent: #5eead4;
+  --accent-ink: #042f2e;
+  --accent-soft: #0e2a27;
+  --focus: #5eead4;
+  --danger: #f87171;
+  --danger-ink: #2a0808;
+  --danger-soft: #2d1316;
+  --ok: #9be07a;
+  --ok-soft: #142612;
+  --warn: #f5c04a;
+  --warn-soft: #2b220c;
+  --highlight: #2f2c10;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 10px 24px -8px rgb(0 0 0 / 0.6), 0 2px 4px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 32px 72px -16px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(255 255 255 / 0.04);
+
+  --role-pm: #f28fb3;
+  --role-tech-lead: #8db6f2;
+  --role-designer: #ecaa80;
+  --role-backend: #7dd3a7;
+  --role-frontend: #6ad1de;
+  --role-qa: #e8c66a;
+  --role-reviewer: #b8acf0;
+  --role-devops: #c0d184;
+  --role-security: #f58a80;
+  --role-human: #e6eded;
+  --role-system: #7d8b8e;
+
+  --st-todo: #7d8b8e;
+  --st-ready: #7b9dff;
+  --st-in_progress: #e8ae4a;
+  --st-blocked: #f07468;
+  --st-review: #b08cff;
+  --st-changes_requested: #f0995a;
+  --st-qa: #4cc9e0;
+  --st-done: #7fd67a;
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --color-chrome: var(--chrome);
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-danger: var(--danger);
+  --color-danger-ink: var(--danger-ink);
+  --color-danger-soft: var(--danger-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-highlight: var(--highlight);
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--chrome);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The workspace canvas: a faint dot grid and a teal aurora that fade out below the top of every screen. */
+.canvas {
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(
+      640px 260px at 100% -80px,
+      color-mix(in srgb, var(--brand-1) 12%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      520px 220px at 0% -100px,
+      color-mix(in srgb, var(--brand-2) 8%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(to bottom, color-mix(in srgb, var(--paper) 35%, transparent) 0, var(--paper) 300px),
+    radial-gradient(color-mix(in srgb, var(--ink) 16%, transparent) 1px, transparent 1.3px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    18px 18px;
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero";
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Brand helpers. */
+.bg-brand {
+  background-image: var(--brand-grad);
+}
+.text-brand {
+  background-image: var(--brand-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@layer components {
+  /* Surfaces */
+  .card {
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+  }
+  .well {
+    border: 1px solid var(--rule);
+    background: var(--sunken);
+    border-radius: var(--radius-sm);
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 2.125rem;
+    padding: 0 0.85rem;
+    border: 1px solid var(--rule-strong);
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 560;
+    letter-spacing: -0.005em;
+    border-radius: var(--radius-sm);
+    box-shadow:
+      0 1px 0 color-mix(in srgb, var(--ink) 4%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--ink) 4%, transparent);
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      background-color 140ms,
+      border-color 140ms,
+      box-shadow 140ms,
+      color 140ms,
+      filter 140ms,
+      transform 80ms;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--sunken);
+    border-color: color-mix(in srgb, var(--ink-3) 70%, var(--rule-strong));
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--brand-grad);
+    color: var(--brand-ink);
+    border-color: transparent;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.2),
+      0 1px 2px rgb(0 0 0 / 0.12),
+      0 6px 16px -8px color-mix(in srgb, var(--brand-1) 80%, transparent);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--brand-grad);
+    border-color: transparent;
+    filter: brightness(1.08) saturate(1.05);
+  }
+  .btn-danger {
+    background: var(--danger);
+    color: var(--danger-ink);
+    border-color: var(--danger);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.14),
+      0 1px 2px rgb(0 0 0 / 0.12);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 88%, var(--ink));
+    border-color: var(--danger);
+  }
+  .btn-ghost {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    border-color: transparent;
+  }
+  .btn-sm {
+    height: 1.75rem;
+    padding: 0 0.6rem;
+    font-size: 12px;
+    border-radius: 6px;
+  }
+
+  /* Form fields */
+  .field {
+    width: 100%;
+    border: 1px solid var(--rule-strong);
+    background: var(--surface);
+    color: var(--ink);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.65rem;
+    font-size: 13px;
+    box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 5%, transparent);
+    transition:
+      border-color 140ms,
+      box-shadow 140ms;
+  }
+  .field:hover {
+    border-color: color-mix(in srgb, var(--ink-3) 70%, var(--rule-strong));
+  }
+  .field:focus,
+  .field:focus-visible {
+    outline: none;
+    border-color: var(--focus);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 24%, transparent);
+  }
+  .field::placeholder {
+    color: var(--ink-3);
+  }
+  select.field {
+    padding-right: 1.5rem;
+  }
+  .label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink-2);
+    margin-bottom: 0.3rem;
+  }
+  .hint {
+    font-size: 12px;
+    color: var(--ink-3);
+  }
+
+  /* Section heading used across screens: a teal tick, a mono label, then a fading hairline. */
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .section-title::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+  .section-title::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, var(--rule-strong), var(--rule) 40%, transparent);
+  }
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--sunken) 0%,
+    color-mix(in srgb, var(--sunken) 40%, var(--surface)) 50%,
+    var(--sunken) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: 6px;
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.pulse-dot {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.flash-in {
+  animation: flash 1.2s ease-out;
+}
+@keyframes flash {
+  from {
+    background-color: var(--highlight);
+  }
+  to {
+    background-color: var(--surface);
+  }
+}
+
+.fade-up {
+  animation: fade-up 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Current phase on the stepper: a slow sheen travels along the filled segment. */
+.phase-live {
+  background-image:
+    linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.5) 50%, transparent 100%), var(--brand-grad);
+  background-size:
+    40% 100%,
+    100% 100%;
+  background-repeat: no-repeat;
+  animation: phase-sheen 2.4s ease-in-out infinite;
+}
+@keyframes phase-sheen {
+  from {
+    background-position:
+      -60% 0,
+      0 0;
+  }
+  to {
+    background-position:
+      160% 0,
+      0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Native dialog */
+dialog.modal {
+  margin: auto;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0;
+  border-radius: var(--radius-lg);
+  max-width: min(32rem, calc(100vw - 2rem));
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+dialog.modal[open] {
+  animation: fade-up 180ms ease-out both;
+}
+dialog.modal:focus-visible {
+  outline: none;
+}
+dialog.modal::backdrop {
+  background: rgb(6 9 9 / 0.55);
+  backdrop-filter: blur(4px) saturate(0.9);
+}
+
+@layer components {
+  /* Markdown prose */
+  .prose {
+    color: var(--ink);
+    font-size: 14.5px;
+    line-height: 1.7;
+    max-width: 76ch;
+  }
+  .prose h1,
+  .prose h2,
+  .prose h3,
+  .prose h4 {
+    font-weight: 650;
+    line-height: 1.25;
+    margin: 1.6em 0 0.6em;
+    scroll-margin-top: 1rem;
+    letter-spacing: -0.015em;
+  }
+  .prose h1 {
+    font-size: 1.7rem;
+    margin-top: 0.2em;
+    letter-spacing: -0.025em;
+  }
+  .prose h2 {
+    font-size: 1.22rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .prose h3 {
+    font-size: 1.03rem;
+  }
+  .prose p,
+  .prose ul,
+  .prose ol,
+  .prose table,
+  .prose pre,
+  .prose blockquote {
+    margin: 0.75em 0;
+  }
+  .prose ul {
+    list-style: disc;
+    padding-left: 1.4em;
+  }
+  .prose ol {
+    list-style: decimal;
+    padding-left: 1.4em;
+  }
+  .prose li {
+    margin: 0.2em 0;
+  }
+  .prose li::marker {
+    color: var(--accent);
+  }
+  .prose a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    text-underline-offset: 3px;
+  }
+  .prose a:hover {
+    text-decoration-color: var(--accent);
+  }
+  .prose code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: var(--sunken);
+    border: 1px solid var(--rule);
+    padding: 0.08em 0.35em;
+    border-radius: 5px;
+  }
+  .prose pre {
+    background: var(--sunken);
+    border: 1px solid var(--rule);
+    padding: 0.85rem 1rem;
+    overflow-x: auto;
+    border-radius: var(--radius-sm);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .prose pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: inherit;
+  }
+  .prose blockquote {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 0.5rem 1rem;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    color: var(--ink-2);
+  }
+  .prose table {
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+    display: block;
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-sm);
+  }
+  .prose th,
+  .prose td {
+    border-bottom: 1px solid var(--rule);
+    padding: 0.45rem 0.7rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .prose th + th,
+  .prose td + td {
+    border-left: 1px solid var(--rule);
+  }
+  .prose tr:last-child td {
+    border-bottom: 0;
+  }
+  .prose th {
+    background: var(--sunken);
+    font-weight: 600;
+  }
+  .prose hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 2em 0;
+  }
+  .prose input[type="checkbox"] {
+    margin-right: 0.4em;
+    accent-color: var(--accent);
+  }
+  .mermaid-block svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* diff2html: blend with the dashboard theme */
+  .diff-view .d2h-wrapper {
+    font-size: 12px;
+  }
+  .diff-view .d2h-file-header {
+    background: var(--sunken);
+    border-color: var(--rule);
+  }
+  .diff-view .d2h-file-wrapper {
+    border-color: var(--rule);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .diff-view .d2h-code-line,
+  .diff-view .d2h-code-side-line {
+    font-family: var(--font-mono);
+  }
+  .diff-view .d2h-file-list-wrapper a {
+    color: var(--accent);
+  }
+}
+
+/* Native controls pick up the brand accent. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: var(--accent);
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+
+/* Live status line on agent cards: a slow shimmer while the agent works. */
+.status-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--ink) 0%,
+    var(--ink) 40%,
+    var(--accent) 50%,
+    var(--ink) 60%,
+    var(--ink) 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: status-shimmer 2.6s linear infinite;
+}
+@keyframes status-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-shimmer {
+    animation: none;
+    color: var(--ink);
+    background: none;
+  }
+  .phase-live {
+    animation: none;
+  }
+}

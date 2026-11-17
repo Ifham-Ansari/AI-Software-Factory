@@ -1,459 +1,462 @@
-# AI Software Factory
+<div align="center">
 
-A hierarchical, supervised autonomous software engineering and deployment system. Describe an
-application in natural language; an organization of AI agents plans it, builds it, tests it, deploys
-it, and hands you live URLs — escalating every high-risk decision to a human.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/asf-logo-dark.svg">
+  <img alt="AI Software Factory" src="docs/brand/asf-logo-light.svg" width="460">
+</picture>
 
-> ## Status: Phase 2 complete — secrets and the realtime backbone
->
-> **Phase 1** — registration with email verification, sign-in, rotating refresh tokens with
-> theft detection, per-owner project CRUD, an audit trail, structured logging with secret
-> redaction, generated TypeScript contracts, and a Next.js control centre.
->
-> **Phase 2** — an envelope-encrypted secret vault that no endpoint can read back, config
-> requirement tracking, Redis rate limiting/idempotency/locks, durable per-run events with
-> gapless sequence numbers, a ticket-authenticated WebSocket with lossless reconnect, and a
-> Postgres job queue with a worker that drains on SIGTERM.
->
-> **No AI agents yet** — those start in Phase 3. Everything above exists so the agent
-> runtime has somewhere safe to put credentials and something durable to run on.
->
-> 614 backend tests (89% coverage) · 53 frontend tests · 16 end-to-end specs — all green
-> against real PostgreSQL and the full stack.
->
-> See [plan.md](plan.md) for the roadmap and [features.md](features.md) for exact status.
+### Your whole AI software team, running on your own machine.
+
+Describe an app in plain words. A product manager, tech lead, designer, engineers, QA, a code reviewer, and DevOps plan it with you and build it in parallel. You watch everything live and approve each step.
+
+[![Node 22.18+](https://img.shields.io/badge/node-22.18%2B-3366FF?logo=node.js&logoColor=white)](#requirements)
+[![Runs on Claude Code](https://img.shields.io/badge/runs%20on-Claude%20Code-5F52FE)](docs/claude-code-integration.md)
+[![Local first](https://img.shields.io/badge/local--first-127.0.0.1-7F45FC)](#safety-and-cost)
+[![License: MIT](https://img.shields.io/badge/license-MIT-8A3FFC)](LICENSE)
+
+[Quickstart](#quickstart) · [How it works](#how-it-works) · [Your first build](#your-first-build) · [Dashboard tour](#dashboard-tour) · [Commands](#commands) · [Safety and cost](#safety-and-cost) · [FAQ](#faq) · [Docs](docs/README.md)
+
+![The AI Software Factory live board](docs/screenshots/board-light.png)
+
+</div>
 
 ---
 
-## What it does
+## Contents
 
+- [What is AI Software Factory?](#what-is-ai-software-factory)
+- [Requirements](#requirements)
+- [Quickstart](#quickstart)
+- [Your first build](#your-first-build)
+- [How it works](#how-it-works)
+- [Dashboard tour](#dashboard-tour)
+- [Commands](#commands)
+- [Safety and cost](#safety-and-cost)
+- [Configuration](#configuration)
+- [FAQ](#faq) · [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Usage and terms](#usage-and-terms)
+
+---
+
+## What is AI Software Factory?
+
+AI Software Factory (`asf` for short) turns Claude Code into a small software company that works for you. Every team member is a headless **Claude Code** process. Each one follows a plain-markdown playbook (a "skill") that you can read and edit. Everything they do streams to a dashboard on `http://127.0.0.1`: files edited, commands run, messages, decisions, and reviews.
+
+**What you get at the end:** a working, tested app in your own folder. The default stack is **Next.js + FastAPI + PostgreSQL**, with Docker Compose for local development and GitHub Actions CI. AI Software Factory never deploys anything.
+
+### Just enough process
+
+Before any work starts, the tech lead sizes each request, the way a real lead sizes a ticket:
+
+| Track | For | What happens |
+|---|---|---|
+| ⚡ **Quick** | UI tweaks, copy changes, small fixes | The tech lead writes 1 to 3 tasks and an engineer does them right away. Each task's own checks must pass. There is no PRD, design, review round, or approval, and you get a "done" notification. |
+| 📋 **Standard** | A feature that needs a short spec | You approve a one-page PRD, then a plan. The build then runs with review and QA. |
+| 🏭 **Full** | A new product or a big feature | The whole flow below. |
+
+Pick **Auto** (the default) to let the tech lead decide, or choose a track yourself. When a request is done, send the next one. You can cancel the current work at any time, and finished work stays.
+
+### The full flow
+
+1. **You write an idea** in plain words ("a booking app for my barbershop").
+2. **The PM asks you one short batch of questions**, each with a recommended answer, then writes a PRD (product requirements document) for you to approve.
+3. **The designer proposes 2 to 3 visual directions.** You pick one, and the designer produces design tokens and screen mockups.
+4. **The tech lead writes the architecture and API contracts**, then a task plan. Code checks the plan: no dependency cycles, and no two parallel tasks editing the same files.
+5. **You choose the team size**, and the build starts. Engineers work in parallel, **directly in your project folder**, like a team sharing one office. Each task owns its own files, so nobody steps on anyone else. Every task goes through **tests → code review → QA → done**, and the project's checks run after each one.
+6. **You approve the release.** The finished app is already in your folder.
+
+### Why AI Software Factory
+
+| | |
+|---|---|
+| 🏠 **Local first** | Runs on your machine, binds to `127.0.0.1`, requires a random access token, and has no telemetry or cloud service. |
+| 🔑 **Your subscription** | Uses the official `claude` CLI with your own login. It never reads or stores your credentials and never calls Anthropic APIs directly. |
+| 🧭 **You stay in charge** | Approval gates for the PRD, design, architecture, plan, and release, plus a kill switch. Agents ask you before anything that costs money, needs a key, or changes scope. |
+| 🧱 **Real engineering, not vibes** | Contracts before code and test-first tasks. A `verify` command must pass before a task counts as done. Every task gets independent code review, QA with bug reports, and project checks after it finishes. |
+| 👀 **Watch them work** | Each agent's card shows what it is doing in plain words ("Running the tests", "Messaging the frontend engineer"), its own plan as a live checklist with a progress bar, the files it touched, and where its task is. |
+| 🔔 **Hear about what matters** | Pop-up and desktop notifications when something needs your approval, an agent asks you a question, a task is blocked, or a task is done. |
+| 💸 **Easy on your usage** | Small changes skip the long process. Routine runs use a lighter model, and agents stop early when stuck. It pauses at Claude Code usage limits and resumes on its own. |
+| ✏️ **Editable team** | Every role's behavior is markdown in [`skills/`](skills/). Change how your PM writes PRDs or how your reviewer judges code, right in the dashboard. |
+
+### The team
+
+| Role | What it does |
+|---|---|
+| **Product manager** | Turns your idea into clarifying questions and a PRD, and answers product questions during the build |
+| **Tech lead** | Architecture, API and data contracts, the task plan, the app scaffold, integration fixes |
+| **Designer** | Visual directions, design tokens, screen specs and HTML mockups, design review of built screens |
+| **Backend engineer** | FastAPI endpoints, models, migrations, and tests |
+| **Frontend engineer** | Next.js screens, components, and tests |
+| **QA engineer** | Verifies each task in the running app, files bugs, writes end-to-end journey tests |
+| **Code reviewer** | Read-only review of every task's diff, with severity-rated comments |
+| **DevOps engineer** | Docker Compose, Dockerfiles, environment files, CI |
+| **Security engineer** *(optional)* | Threat model and a pre-release audit |
+
+---
+
+## Requirements
+
+| Tool | Why | Check |
+|---|---|---|
+| **Node.js 22.18+** | Runs AI Software Factory | `node --version` |
+| **Git** (any recent version) | Claude Code needs it on Windows (Git Bash). AI Software Factory itself does not use git in your project | `git --version` |
+| **Claude Code**, logged in | Runs the agents ([install](https://docs.claude.com/en/docs/claude-code)). Run `claude` once to log in | `claude --version` |
+| **pnpm** | Installs AI Software Factory (ships with Node through corepack) | `corepack pnpm --version` |
+| **Docker** with Compose | Gives each agent its own database for the apps it builds | `docker compose version` |
+| **uv** | Python tooling for the default FastAPI backend ([install](https://docs.astral.sh/uv/)) | `uv --version` |
+
+It runs on macOS, Linux, and Windows, and is developed on Windows with Git Bash. On Windows, [Git for Windows](https://git-scm.com/download/win) is required, because AI Software Factory and Claude Code use its `bash`. Docker and uv are only needed by the apps the team builds, so you can install them later.
+
+---
+
+## Quickstart
+
+### Windows: double-click `run.bat`
+
+Install [Node.js 22.18+](https://nodejs.org) and [Claude Code](https://docs.claude.com/en/docs/claude-code) (run `claude` once to log in), download or clone this repository, then **double-click `run.bat`** in its folder.
+
+The first time, it checks your tools, installs the dependencies, and builds the dashboard (a minute or two). Then it starts AI Software Factory and opens the dashboard in your browser, with the folder picker in `%USERPROFILE%\asf-projects`. Create a folder there for your app, or browse to any other folder. Keep the window open while you work, and press **Ctrl+C** in it to stop.
+
+* To open a specific project right away, drag its folder onto `run.bat`.
+* If port 4800 is busy, run `run.bat --port 4801` from a terminal.
+* Double-clicking `run.bat` again while it's already running just opens the dashboard.
+
+### Option A: let Claude Code set it up (recommended)
+
+```bash
+git clone <repo-url> ai-software-factory
+cd ai-software-factory
+claude
 ```
-"Build a restaurant management system with authentication, a dashboard,
- inventory management, PostgreSQL, FastAPI, Next.js, tests, and deployment."
-                              ↓
-   Requirements analysis → identifies what's missing → asks you
-                              ↓
-   Architecture + OpenAPI contract → task decomposition
-                              ↓
-   Backend · Frontend · Database agents build in parallel
-                              ↓
-   Tests generated and run → failures diagnosed and fixed autonomously
-                              ↓
-   Security review → quality gate
-                              ↓
-   Database provisioned → migrations dry-run on a branch → your approval → applied
-                              ↓
-   Deployed → health verified → 🚀 live URLs
+
+Then say **"set up AI Software Factory"**. Claude follows [`CLAUDE.md`](CLAUDE.md): it checks your prerequisites, installs everything, helps you pick a project folder, and starts the dashboard. It explains each step and asks before installing anything system-wide.
+
+### Option B: set it up yourself
+
+```bash
+# 1. Get AI Software Factory and install it
+git clone <repo-url> ai-software-factory
+cd ai-software-factory
+corepack pnpm install
+corepack pnpm build          # builds the dashboard
+
+# 2. Install the `asf` command so it works from any folder
+node packages/cli/bin/asf.js setup
+#    Windows: adds %USERPROFILE%\.asf\bin to your user PATH.
+#    macOS / Linux: installs ~/.local/bin/asf (it tells you if that folder is not on your PATH).
+#    Then open a NEW terminal.
+
+# 3. Check your machine
+asf doctor
 ```
 
-At every high-risk step — a production deployment, a destructive migration, a billable resource —
-the run **pauses durably** and waits for you.
+From then on, use it from **any folder**:
 
-## What makes it different
+```bash
+cd ~/code/my-app        # a new, empty folder or an existing project
+asf up                  # starts AI Software Factory and opens the dashboard for this folder
+```
 
-Most multi-agent demos are agents calling agents. This one is built around **supervision**:
+* In a folder that is already an AI Software Factory project, the dashboard opens that project.
+* In any other folder, the dashboard opens a **folder picker** at that location. Browse, create a new folder, and choose where the app and all its files should go. The folder is set up for you.
+* If you prefer the terminal, `asf init` does the same setup.
 
-- **Real hierarchy.** Executive → department supervisors → workers → tools. Four levels, and each
-  supervisor genuinely validates its department's output against explicit acceptance criteria.
-- **Failure as control flow.** A seven-class error taxonomy routes failures to backoff,
-  analyst-driven diagnosis, reassignment, or a human. Four independent guards make infinite loops
-  structurally impossible.
-- **Human control that actually works.** LangGraph interrupts + Postgres checkpoints mean a paused
-  run holds **no process open**. It can wait days across platform restarts and resume exactly.
-- **Secrets that never reach a model.** Envelope encryption; agents get `secret://` references;
-  values are resolved only at three audited sinks and never enter a prompt, a trace, or graph state.
-- **Generated code treated as hostile.** It executes only inside a hardened container with network
-  egress denied by default. Agents get typed tools, never a shell.
-- **Measured, not asserted.** Phase 8 puts agent and supervisor quality under LangSmith evaluation
-  with a CI regression gate.
+`asf up` prints a link like `http://127.0.0.1:4800/?token=…` and opens it in your browser. **Keep that terminal open: Ctrl+C stops AI Software Factory and every agent.** If it is already running, `asf up` in another folder just opens the dashboard there.
 
-## Architecture at a glance
+> [!TIP]
+> Agents work **directly in the folder you choose**. AI Software Factory adds one hidden `.asf` folder (plans, documents, the team's notes) and nothing else: no git repository, branches, or commits. If your folder already uses git, it is left to you, and agents can only read it. To remove the global command, run `asf setup --uninstall`.
+
+---
+
+## Your first build
+
+For a small change, type it on the Idea screen and leave the process on **Auto**, and it is built right away. The steps below are the **full** track for a new app. Start small: a good first app takes roughly 8 tasks, and [`examples/todo-with-auth.md`](examples/todo-with-auth.md) is one you can paste in.
+
+1. **Keep it small at first.** In **Settings**, keep *max concurrent agents* at 2 or 3 and leave every approval gate on.
+2. **Idea.** Describe the app, add screenshots or links if you have them, choose a stakes level, and submit.
+3. **Questions.** The PM sends one batch of questions, each with a recommended option and why it matters. Answer them, or click **Accept all recommendations**.
+4. **PRD.** Read it in **Documents**. Click **Approve**, or **Request changes** with comments, and the PM revises it.
+5. **Design.** Each visual direction comes with a live preview of your main screen, so you choose from something you can see. The designer then produces tokens and a mockup of every screen. **Review the mockups at desktop and mobile sizes and approve the design** (or ask for changes) before any architecture or code is written.
+6. **Architecture.** Review the tech lead's architecture and API contract, then approve it.
+7. **Plan and team.** **Team builder** shows every task, the dependency graph, the critical path, and a rough time estimate. Pick how many agents per role (agents beyond the plan's parallel lanes just wait), then click **Approve plan & start build**.
+8. **Watch the build.**
+   * **Agents** shows the team at work: each agent's status in plain words, its plan as a checklist with a progress bar, the files it touched, and its task's stage. Open **Details** on a card for the full live transcript: reasoning, each edit, each command and its output.
+   * On the **Live board**, tasks move from *To do* to *Done*.
+   * The **Team feed** shows agents messaging each other, reviews, and blocked actions.
+   * Notifications pop up when an agent asks you something, a document needs your approval, a task is blocked, or a task is done. You can turn on desktop notifications from the bell.
+   * **Changed your mind?** Click **Request a change** in the header any time after the PRD is approved. The PM updates the PRD and the tech lead updates the plan, each for your approval, and new tasks join the build. Finished work is kept unless your change says otherwise.
+9. **Release.** QA runs the full suite on the finished project, and AI Software Factory writes a release summary for you to approve. Everything is already in your folder.
+
+---
+
+## How it works
 
 ```mermaid
 flowchart LR
-    W["Next.js<br/>Control Center"] <-->|"REST + WS"| A["FastAPI"]
-    A -->|"enqueue in txn"| Q[("Postgres<br/>job queue")]
-    Q --> K["Workflow<br/>Worker"]
-    K --> G["LangGraph<br/>Engine"]
-    G --> T["Permissioned<br/>Tools"]
-    G <-->|"checkpoints"| P[("Neon<br/>Postgres")]
-    K -->|"events"| R[("Upstash<br/>Redis")]
-    R -->|"fan-out"| A
-    T --> X["Neon · GitHub<br/>Vercel · Render"]
-    G --> L["LangSmith"]
+  idea([Your idea]) --> pm[PM questions]
+  pm --> prd[PRD]
+  prd -->|you approve| dir[Design directions<br/>+ live previews]
+  dir -->|you pick| mock[Tokens + screen mockups]
+  mock -->|you approve| arch[Architecture<br/>+ contracts]
+  arch -->|you approve| plan[Task plan]
+  plan -->|you approve + pick team| build
+  subgraph build[Parallel build]
+    direction LR
+    eng[Engineer<br/>test first, verify] --> rev[Code review] --> qa[QA] --> done[Done + project checks]
+  end
+  build --> journey[QA journey tests<br/>optional security audit]
+  journey -->|you approve| release([Release])
 ```
 
-The API never runs a graph. Runs execute in a separate worker process so an API restart cannot kill
-one. Events are persisted before they are published, so a reconnecting browser replays from a
-sequence number rather than losing history.
+* **Every agent is a real Claude Code session.** AI Software Factory starts `claude -p` in your project folder with that role's skills added to its system prompt, a scoped access token, and its own ports and Docker Compose project.
+* **Parallel agents never collide.** Each task owns its files. The scheduler never runs two tasks that own the same file, and a guard hook stops edits outside a task's files.
+* **No git machinery.** Agents don't create branches or commits. To show what a task changed (for review and for you), AI Software Factory copies the task's files when it starts and diffs against that copy.
+* **Agents share state only through the `asf` CLI:** `asf task done`, `asf ask @human`, `asf msg @frontend`, `asf review approve`, and so on ([reference](skills/team-protocol/references/asf-cli.md)). The server checks role permissions on every command.
+* **Plain code makes the decisions.** Scheduling, permissions, and plan validation are deterministic code, not an LLM. A task is "done" only when its `verify` command passes, review approves it, and QA passes it. If the project's checks fail afterwards, the tech lead gets a repair task.
+* **Everything is visible.** Each agent's actions, messages, decisions, reviews, and raw output are stored and streamed to the dashboard, and survive a page reload.
+* **Only what you asked for.** Every role follows a scope rule: build exactly what you said and what you approved. Anything an agent thinks is missing becomes a question or a "Later" note you can see, never a silent extra. Reviewers flag unrequested additions.
+* **The team learns.** When an agent, a reviewer, or you spot a mistake that could happen again, it becomes a one-line lesson in the project's memory. Every later run sees the lessons that match its role and files, so mistakes are not repeated (and you don't pay to fix them twice). Edit the memory on the **Memory** screen.
+* **Token-thrifty teamwork.** Each role's system prompt is identical across runs, so Claude Code's prompt cache is reused. Messages are short and capped (details go in files). Questions to the same role are answered in one batched run, and inboxes are trimmed. Interrupted agents resume their own sessions instead of starting over.
 
-Full detail: [architecture.md](architecture.md).
+### Existing projects
 
-## Technology
+Run `asf up` (or `asf init`) inside a folder that already has code. On your first request the **tech lead surveys the codebase**: stack, layout, conventions, and the exact test and build commands. The survey goes into a short `codebase.md` that every agent reads instead of exploring again. The PM then plans **only the change you asked for** (a feature or a fix). There is no scaffold, and your project's own checks run after every finished task. Agents edit your files directly, so keep a backup (or commit, if you use git) before a big change.
 
-| Layer | Stack |
-|---|---|
-| **Frontend** | Next.js 16 (App Router, RSC) · TypeScript strict · pnpm · Node 24 LTS |
-| **Backend** | Python 3.13 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 · Alembic · uv |
-| **AI** | LangGraph 1.2 · LangChain 1.x · LangSmith · OpenAI |
-| **Data** | Neon Postgres · pgvector · Upstash Redis |
-| **Quality** | pytest · Vitest · Playwright · ruff · mypy --strict · import-linter |
-| **Ops** | structlog · OpenTelemetry · Docker |
-
-Every choice, with the alternative it beat, is in [architecture.md](architecture.md) §15.
+📚 More detail: [Architecture](docs/architecture.md) · [How it uses Claude Code](docs/claude-code-integration.md) · [Security review](docs/security-review.md) · [Design decisions](docs/decisions/) · [All docs](docs/README.md)
 
 ---
 
-## Getting started
+## Dashboard tour
 
-### Requirements
-
-- Python 3.13 and [uv](https://docs.astral.sh/uv/) — uv installs the right Python for you
-- Node 22+ and pnpm
-- A PostgreSQL database — a [Neon](https://neon.com) project, or Docker locally
-- Optionally [Upstash Redis](https://upstash.com), for cross-replica event fan-out. The
-  platform works without it: events stay durable and clients replay over REST.
-
-Later phases add more: OpenAI and LangSmith (Phase 3), Docker for the code sandbox
-(Phase 5), GitHub/Vercel/Render tokens (Phases 5 and 7). Neither is needed to run what
-exists today.
-
-If you already have those credentials, put them in `.env` now — configuration for OpenAI
-and LangSmith exists and validates them, and registers them with the log redactor at
-startup. Nothing consumes them yet; `/ready` simply reports which are configured.
-
-### Install
-
-```bash
-git clone <repo-url> && cd "AI Software Factory"
-uv sync          # backend workspace
-pnpm install     # frontend workspace
-```
-
-### Configure
-
-```bash
-cp .env.example .env
-```
-
-Fill in the required values. The application **fails fast at startup** if a required variable is
-missing, naming the variable.
-
-Two variables are required, and a third is required for the secret vault:
-
-| Variable | Purpose |
+| Screen | What you do there |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string. A plain `postgresql://` URL is rewritten to the psycopg driver automatically, so a pasted Neon string works unmodified |
-| `JWT_SECRET_KEY` | Signs access tokens. At least 32 characters; startup refuses anything shorter |
-| `SECRETS__MASTER_KEY` | Encrypts stored project credentials. Without it the platform runs, but storing a secret returns 503 rather than falling back to storing it in the clear |
+| **Idea** | Describe the app and add attachments and links |
+| **Needs you** | Everything waiting on you in one list, with one-click actions: questions, approvals, blocked or paused tasks, and alerts (also shown at the top of the board) |
+| **Questions** | Answer batched questions (with recommendations) and anything an agent asks `@human`, and see alerts |
+| **Documents** | Read the PRD, architecture, contracts (OpenAPI rendered), decisions, and plan. Compare versions, comment, approve |
+| **Design** | Compare live previews of each direction, browse tokens, review every screen mockup at desktop and mobile sizes, and approve the design |
+| **Team builder** | Task graph, critical path, and estimate. Choose agents per role and models, then start the build |
+| **Live board** | Kanban of every task. Open one for its file, timeline, handoff, review, QA report, diff, and verify output |
+| **Agents** | Watch agents work in real time: a live transcript per agent (its reasoning, each edit with an inline diff, each command and its output) and elapsed time. Pause or stop one agent |
+| **Team feed** | Everything the team does, as it happens. Filter by role or task |
+| **Preview** | Run the finished app (Docker) and use it in the dashboard |
+| **Memory** | The lessons the team learned on this project. Add, pin, or remove them |
+| **Usage** | Tokens, runs, and cost per day and per role, against your optional daily budget |
+| **Settings** | Concurrency, gates, QA per task, models per role, preview command, permission mode, check commands, and the **skills editor** |
 
-```bash
-# Signing key
-python -c "import secrets; print(secrets.token_urlsafe(48))"
+The header always shows the phase, open questions, notifications, **Request a change**, **Pause/Resume**, and the red **Kill switch**.
 
-# Master key for the secret vault
-uv run python scripts/generate_master_key.py
-```
+<details>
+<summary><b>More screenshots</b></summary>
 
-> ⚠️ **Losing `SECRETS__MASTER_KEY` makes every stored secret permanently unrecoverable.**
-> It is never written to the database, so a database backup does not contain it. Back it up
-> before storing anything real, and read
-> [docs/runbooks/key-management.md](docs/runbooks/key-management.md) — it covers online
-> rotation, which needs no downtime.
+**Team feed** (dark theme)
+![Team feed](docs/screenshots/feed-dark.png)
 
-`REDIS_URL` is optional. Without it the platform works and every event is still durable in
-PostgreSQL; a browser recovers what it missed by replaying over REST. Redis buys latency,
-not correctness.
+**Agents at work**
+![Agents](docs/screenshots/agents-live.png)
 
-Everything else has a working default — see [.env.example](.env.example), which documents
-each one and what it does.
+**Questions with recommendations**
+![Questions](docs/screenshots/questions.png)
 
-The frontend needs `API_BASE_URL` in `apps/web/.env.local` if the API is not on
-`http://127.0.0.1:8000`. It is deliberately **not** a `NEXT_PUBLIC_` variable: the browser
-never calls the REST API directly, so nothing about the backend's location reaches the
-bundle.
+**Team builder with the task graph**
+![Team builder](docs/screenshots/team-builder.png)
 
-The one exception is the event WebSocket, which cannot be proxied through a Next.js route
-handler. Its origin defaults to `API_BASE_URL` with `http` swapped for `ws`; override it
-with `WS_BASE_URL` when the API is behind a different public hostname. It is still not
-public — the URL is returned by the authenticated ticket route, and the handshake requires
-a single-use ticket regardless.
+**Task diff**
+![Task diff](docs/screenshots/task-drawer-diff.png)
 
-⚠️ **Never put a real secret in `.env.example`.** It is committed. Real values belong in
-`.env`, which is gitignored.
+**Documents**
+![PRD](docs/screenshots/docs-prd.png)
 
-### Database
-
-```bash
-uv run alembic upgrade head
-```
-
-### Run
-
-One command starts everything:
-
-```bash
-uv run dev
-```
-
-Output is prefixed per process, and Ctrl+C stops all three. Or run them separately, which
-gives clearer output when debugging one of them:
-
-```bash
-uv run dev-api               # FastAPI      → http://127.0.0.1:8000  (docs at /docs)
-uv run dev-worker            # workflow worker (a process shell until Phase 2)
-pnpm --filter web dev        # Next.js      → http://127.0.0.1:3000
-```
-
-Then open http://127.0.0.1:3000 and register an account.
-
-#### Where the verification code goes
-
-Registration emails a 6-digit code, and the account cannot sign in until it is redeemed.
-Out of the box `EMAIL__TRANSPORT=console`, which means **the code is printed in the
-`uv run dev-api` terminal rather than emailed** — no mail account needed to develop:
-
-```
-[warning] email.console_transport  to=you@example.com
-    Your verification code is: 047743
-```
-
-To send real mail instead, set the SMTP block in `.env`. With Gmail:
-
-1. Turn on 2-Step Verification — <https://myaccount.google.com/security>
-2. Create an **App Password** (16 characters) — <https://myaccount.google.com/apppasswords>
-   Your normal Google password will not work; Google disabled it for SMTP in 2022.
-3. Fill in and switch the transport:
-
-```ini
-EMAIL__TRANSPORT=smtp
-EMAIL__FROM_ADDRESS=you@gmail.com     # must match SMTP_USERNAME, or Google rejects it
-EMAIL__SMTP_HOST=smtp.gmail.com
-EMAIL__SMTP_PORT=587
-EMAIL__SMTP_USERNAME=you@gmail.com
-EMAIL__SMTP_PASSWORD=abcd efgh ijkl mnop
-```
-
-Startup validates this and refuses to run on a configuration that cannot deliver — a
-missing host, a sender left as the placeholder, or a username without a password — so a
-typo surfaces as a named variable at boot rather than as a failed signup.
-
-Prefer not to use a personal mailbox? Point it at a local catcher and read the mail in a
-browser — no credentials, nothing leaves the machine:
-
-```bash
-docker run -d -p 1025:1025 -p 8025:8025 axllent/mailpit   # inbox at :8025
-```
-```ini
-EMAIL__TRANSPORT=smtp
-EMAIL__FROM_ADDRESS=dev@example.com
-EMAIL__SMTP_HOST=127.0.0.1
-EMAIL__SMTP_PORT=1025
-EMAIL__SMTP_USE_TLS=false
-```
-
-`console` is refused in production, because it would write a live credential into a log
-aggregator.
-
-> **On Windows, start the backend with `uv run dev-api`, not `uvicorn` directly.**
-> psycopg's async mode cannot use Windows' default `ProactorEventLoop`, and uvicorn selects
-> its loop through a factory that ignores the asyncio policy. `dev-api` owns the loop and
-> picks a compatible one; invoking uvicorn yourself produces an `InterfaceError` on the
-> first query that reads like a connectivity problem. Linux is unaffected.
-
-### Realtime and the job queue
-
-Open a project and the page shows a live activity feed with a connection indicator.
-"Run a test job" enqueues a `noop` job; the worker claims it, emits progress events, and
-they arrive over the WebSocket within a second or two.
-
-That path is the whole Phase 2 backbone end to end — enqueue in a transaction, claim with
-`SKIP LOCKED`, execute, persist with a per-run sequence number, publish through Redis, fan
-out to the browser. It exists to prove the pipeline before any agent needs it.
-
-**Reconnection is lossless.** Kill your network, run another job, and reconnect: the client
-replays from the last sequence number it saw, so the feed fills the gap with no duplicates.
-That works even with Redis stopped — the socket goes quiet, the events stay durable, and
-the replay delivers them.
-
-```bash
-# Watch the worker claim and run jobs
-uv run dev-worker
-```
-
-### Test
-
-```bash
-uv run pytest                              # all backend tests (~20s)
-uv run pytest packages/core/tests/unit -x  # fast feedback loop (~3s)
-uv run pytest -m security                  # isolation, redaction, enumeration resistance
-uv run pytest -m failure                   # adversarial and fault-injection cases
-pnpm --filter web test                     # component tests
-pnpm --filter web test:e2e                 # end-to-end (needs the full stack running)
-```
-
-**Integration tests need a real database.** Without `TEST_DATABASE_URL` they skip — loudly,
-with a message saying what they cover. They prove what in-memory fakes structurally cannot:
-that the generated SQL really scopes by owner, that constraints and cascades behave as
-declared, and that migrations reverse.
-
-⚠️ **The target database is wiped on every run.** Point it at a throwaway, never at the
-database in `DATABASE_URL`.
-
-Either use a local container:
-
-```bash
-docker run -d --name factory-test-db -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17-alpine
-# then in .env:
-TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
-```
-
-…or a separate database on the same Neon project — same connection string with the
-database name changed:
-
-```
-DATABASE_URL=postgresql://user:pw@ep-xxx.neon.tech/neondb?sslmode=require
-TEST_DATABASE_URL=postgresql://user:pw@ep-xxx.neon.tech/factory_test?sslmode=require
-```
-
-Create it once with `CREATE DATABASE factory_test;`. `.env` is read by the test suite, so
-no export is needed.
-
-CI provisions a `postgres:17` service automatically; see
-[.github/workflows/ci.yml](.github/workflows/ci.yml).
-
-### End-to-end
-
-Playwright drives a real browser against the running stack, so start it first:
-
-```bash
-uv run dev                            # or the three commands separately
-pnpm --filter web exec playwright install chromium   # once
-pnpm --filter web test:e2e
-```
-
-> **The signup specs need `EMAIL__TRANSPORT=console`.** They read the verification code
-> from a debug endpoint that only exists in development/test, and that endpoint serves the
-> console transport only — it refuses to hand out a code once real mail is configured,
-> which is the point of it. If your `.env` is set to `smtp`, start the API with the
-> transport overridden for the run:
->
-> ```bash
-> EMAIL__TRANSPORT=console uv run dev-api      # PowerShell: $env:EMAIL__TRANSPORT="console"
-> ```
->
-> CI is unaffected: it has no `.env`, so it already defaults to `console`.
-
-### Quality gates
-
-Everything CI enforces, runnable locally:
-
-```bash
-uv run ruff check . && uv run ruff format --check .
-uv run mypy packages/core/src apps/api/src apps/worker/src scripts
-uv run lint-imports                         # layering contracts
-uv run python scripts/check_file_size.py    # the 250-line rule
-pnpm --filter web lint
-pnpm -r typecheck
-```
-
-> **On Windows, also run mypy the way CI will.** mypy narrows `sys.platform` to the host
-> it is checking on, so a Windows-only branch is live locally and *dead code* on Linux —
-> which `warn_unreachable` reports as an error. That passes here and fails in CI:
->
-> ```bash
-> uv run mypy --platform linux packages/core/src apps/api/src apps/worker/src scripts
-> ```
->
-> Guard platform-specific code with a positive `if sys.platform == "win32":` block rather
-> than an early `if sys.platform != "win32": return`. mypy skips a guarded block silently,
-> but treats statements after an always-taken return as unreachable. Both functions in
-> `packages/core/src/factory_core/runtime.py` are written that way for this reason.
-
-`lint-imports` enforces layering: `core` may not import a web framework, `domain` may not
-import SQLAlchemy, and the API and worker must stay independent processes. A violation
-fails the build rather than becoming a review comment.
-
-### LangSmith
-
-Set `LANGSMITH_TRACING=true` plus `LANGSMITH_API_KEY` and `LANGSMITH_PROJECT`. Every graph node,
-agent call, and tool invocation is traced with project/run/task IDs and the prompt version.
-Redaction hooks strip secrets before anything leaves the process.
+</details>
 
 ---
 
-## Repository structure
+## Commands
 
-```
-apps/
-  api/          FastAPI — routers, DTOs, middleware, WebSocket
-  worker/       workflow executor process
-  web/          Next.js control center
-packages/
-  core/         domain, application, persistence, infrastructure   (no LangGraph, no FastAPI)
-  agents/       graphs, supervisors, workers, tools, prompts       (no FastAPI)
-  contracts/    generated TypeScript types — never hand-edited
-infra/          docker, compose, sandbox image, provider config
-docs/           adr/ · runbooks/ · evaluation/
-scripts/        dev, codegen, db, verify-phase
-tests/          cross-cutting end-to-end suites
-```
+| Command | What it does |
+|---|---|
+| `asf setup [--uninstall]` | Install (or remove) the global `asf` command so it works from any folder |
+| `asf init [folder]` | Make a folder an AI Software Factory project (adds only the hidden `.asf/` folder) |
+| `asf doctor [--login]` | Check prerequisites and print fixes. `--login` also confirms Claude Code is logged in (asks first, then sends one tiny prompt) |
+| `asf up [--port N] [--no-open]` | Start the server and dashboard on `127.0.0.1` (default port 4800) |
+| `asf status` | Phase, task counts, and working agents for the current project |
+| `asf pause` / `asf resume` | Stop / restart starting new agent runs |
+| `asf stop` | **Kill switch:** stop every agent process immediately |
+| `asf logs <agent\|task> [-f]` | Recent events for an agent (`backend-1`) or a task (`T012`) |
 
-## Development workflow
+Agents use the same binary for their own commands (`whoami`, `task`, `msg`, `ask`, `review`, `qa`, ...). You normally never need those. Run `asf help` for the full list.
 
-```
-Read docs → inspect code → design → implement → TEST → fix → verify criteria
-          → document → pre-push verification → hand off for commit
-```
+---
 
-Phases are built strictly in order, and a phase is complete only when its acceptance criteria have
-passing tests — not when the code compiles. Full procedure in [instructions.md](instructions.md).
+## Safety and cost
 
-Three rules that matter more than the rest: **after implementing anything, test it before moving
-on**; **no source file exceeds 250 lines** (enforced in CI); and **every change goes through the
-pre-push verification** in [instructions.md](instructions.md) §14 — every applicable CI job
-reproduced locally — before it is called done.
+### What agents can and cannot do
 
-**Git is done by hand.** Claude Code and any other assistant working in this repository may read the
-repository (`git status`, `git diff`, `git log`) but never commit, push, or change remote state.
-Verified changes are left in the working tree for a human to review and commit.
+A guard hook runs before every file edit and shell command an agent makes. It blocks the action, with a clear reason, when the agent tries to:
 
-## Roadmap
+* write outside your project folder, or outside the files its task owns (the code reviewer can't edit code at all);
+* change git state (add, commit, reset, checkout, push...) in your project;
+* delete files outside the project folder, or wipe another agent's Docker volumes;
+* call the internet with `curl`/`wget` (localhost only, unless a task allows it);
+* read Claude credentials or touch AI Software Factory's own database.
 
-| Phase | Delivers | Status |
+Everything else in the shell is allowed, as in Claude Code, so agents can install packages, run tests, and start the app without being stopped. Destructive or paid actions need your approval.
+
+> [!WARNING]
+> AI Software Factory is a policy sandbox, not an operating-system sandbox: agents run as your user. For untrusted ideas, run it in a VM or container. See the [security review](docs/security-review.md).
+
+### What it costs
+
+Every agent run uses your Claude Code subscription (or API billing, if you set that up in Claude Code). These controls keep it in check:
+
+* **Just enough process:** small changes go straight to an engineer. Only big requests get questions, a PRD, design, and architecture.
+* **Lighter model for routine runs:** sizing a request, answering teammates, code review, and QA checks use Sonnet, unless you choose a model per role in Settings.
+* **Concurrency:** a global cap (default 3) and per-role counts from the team builder.
+* **Usage limits:** when Claude Code reports a limit, AI Software Factory pauses, shows the reset time, and resumes on its own afterwards (you can turn this off).
+* **Runaway guards:** turn limits per role, a time limit per run, and blocking of any task that fails 3 times in a row until you look at it.
+* **Optional daily cap:** an optional daily token cap in Settings, off by default.
+
+---
+
+## Configuration
+
+Most settings live in the dashboard (**Settings**) and are stored per project:
+
+| Setting | Default | Notes |
 |---|---|---|
-| 1 | Platform foundation, auth, projects, contracts, CI | **Complete** |
-| 2 | Secret vault, event bus, WebSocket, job queue, project UI | **Complete** |
-| 3 | Agent runtime, tool framework, budgets, HITL, intake | Not started |
-| 4 | Hierarchical supervision, parallelism, recovery, arbitration | Not started |
-| 5 | Sandboxed workspace, code generation, git | Not started |
-| 6 | Test generation, security review, autonomous fix loop | Not started |
-| 7 | Neon provisioning, migration pipeline, deployment, health | Not started |
-| 8 | LangSmith evaluation, RAG, quotas, monitoring, hardening | Not started |
+| Max concurrent agents | 3 | Total agents running at once |
+| Daily token cap | off | Optional. No new runs start once the cap is reached |
+| Approval gates | all on | PRD, design direction, screen designs, architecture, plan, release. Each can auto-approve |
+| Models per role | Claude Code default | For example a stronger model for the tech lead and a faster one for the reviewer |
+| Max turns per role, run timeout | 80 turns / 45 min | Runaway guards |
+| Permission mode | `dontAsk`, shell allowed | Claude Code's tools are allowed, and the guard hook decides what is unsafe. `bypassPermissions` is available with a warning |
+| Check commands | from the scaffold or codebase survey | Run on the project after every finished task |
+| QA per task, security audit | on / off | |
 
-Details, acceptance criteria, and risks per phase: [plan.md](plan.md).
+Role definitions, write paths, and the default stack are in [`roles.yaml`](roles.yaml). Role behavior is in [`skills/`](skills/). To change it for one project, edit it in **Settings → Skills** (you can reset to the default). The project then gets its own copy in `.asf/skills/`.
 
-## Documentation
+### What AI Software Factory adds to your project
 
-| File | What it is |
+```
+my-app/                    your project: the agents' code goes here, like any developer's
+  .asf/                    the one hidden folder AI Software Factory adds
+    asf.db                 the task board, messages, reviews, and history
+    docs/                  PRD, design, architecture, contracts, decisions
+    tasks/                 the task plan
+    handoffs/, reviews/    the team's notes
+    snapshots/             copies of each task's files from when it started (for "what changed")
+    runs/                  each agent run's prompt and raw output
+```
+
+Per-user state (the list of your projects and the running server's address) lives in `~/.asf/`.
+
+---
+
+## FAQ
+
+<details>
+<summary><b>Is this an official Anthropic product?</b></summary>
+
+No. AI Software Factory is an independent open-source project that runs the official Claude Code CLI. See [Usage and terms](#usage-and-terms).
+</details>
+
+<details>
+<summary><b>Does it send my code anywhere?</b></summary>
+
+Only Claude Code talks to Claude, exactly as when you use `claude` yourself. The server listens on `127.0.0.1`, requires a token, and has no telemetry.
+</details>
+
+<details>
+<summary><b>Can I use a different stack?</b></summary>
+
+Yes. Tell the PM in your idea or answers (for example "use Django and Vue"). The tech lead records the stack in the architecture, and the skills adapt. The built-in skills have the most detail for the default stack.
+</details>
+
+<details>
+<summary><b>Can I add it to an existing app?</b></summary>
+
+Yes. Run `asf up` in the project folder and open it from the dashboard (or run `asf init` there). The tech lead surveys the code first, and the team changes only what you ask for. Agents edit your files directly, so back up (or commit) your work before you start. See [Existing projects](#existing-projects).
+</details>
+
+<details>
+<summary><b>Can I change the plan once the build has started?</b></summary>
+
+Yes. Use **Request a change** in the header. The PM updates the PRD and the tech lead updates the plan, each with your approval. Tasks already finished are kept, and new tasks wait until you approve the updated plan.
+</details>
+
+<details>
+<summary><b>An agent is stuck or looping. What do I do?</b></summary>
+
+Open its card on **Agents** to see the raw output, or the task on the **Live board** for its verify output. You can pause that agent, unblock or hold the task, answer its question, or hit the kill switch. Tasks that fail three times stop on their own and alert you.
+</details>
+
+<details>
+<summary><b>What happens if I close the terminal or my machine restarts?</b></summary>
+
+Agents stop. Run `asf up` again and nothing is lost: interrupted tasks resume their own sessions, and the board picks up where it left off.
+</details>
+
+<details>
+<summary><b>Can I change how the agents behave?</b></summary>
+
+Yes, that is what skills are for. Edit them per project in **Settings → Skills**, or edit [`skills/`](skills/) before `asf init` to change the defaults.
+</details>
+
+<details>
+<summary><b>Can I use Codex or another agent CLI?</b></summary>
+
+Not yet. The runner is behind an interface so other CLIs can be added later.
+</details>
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
 |---|---|
-| [CLAUDE.md](CLAUDE.md) | Orientation and non-negotiable rules — **read first** |
-| [plan.md](plan.md) | Phase roadmap, acceptance criteria, decisions, risks |
-| [architecture.md](architecture.md) | Design of record with diagrams |
-| [features.md](features.md) | Feature registry — 127 features and their real status |
-| [instructions.md](instructions.md) | Development procedure and standards |
-| `docs/adr/` | Architecture decision records |
-| `docs/runbooks/` | Operational procedures |
+| `asf doctor` says Claude Code is missing | Install Claude Code, run `claude` once to log in, then `asf doctor --login` |
+| The dashboard says "open the link printed by asf up" | The page needs the token. Use the full link from the terminal, or run `asf up` again to print it |
+| Port 4800 is in use | `asf up --port 4801` |
+| Backend tasks fail with "uv: command not found" | Install [uv](https://docs.astral.sh/uv/) and restart `asf up` |
+| Agents can't start databases | Start Docker Desktop (or the Docker daemon) and check `docker compose version` |
+| AI Software Factory paused itself | Check the header. The cause is a Claude Code usage limit (it resumes on its own), the optional daily cap in Settings, or the kill switch (run `asf resume`) |
+| `asf: command not found` | Open a new terminal after `asf setup`, or run `node <repo>/packages/cli/bin/asf.js <command>` |
+| `pnpm: command not found` | Use `corepack pnpm …`, or run `corepack enable` once |
 
-## Security
+---
 
-Secrets are never logged, traced, prompted, or returned. Generated code executes only in an isolated
-container with egress denied by default. Agents receive typed, permissioned tools — never a shell.
-Tool permissions are enforced by the runtime, not the prompt, so a successful prompt injection still
-cannot escalate privilege. Every high-risk action requires human approval.
+## Development
 
-Found a vulnerability? Open a private security advisory rather than a public issue.
+```bash
+corepack pnpm install
+corepack pnpm check                          # typecheck + lint + unit and end-to-end tests (fake claude: no quota)
+corepack pnpm test:e2e                       # dashboard browser tests (Playwright)
+corepack pnpm --filter @asf/dashboard dev    # dashboard dev server (proxies to a running `asf up`)
+```
 
-## License
+| Package | |
+|---|---|
+| `packages/core` | Pure logic: plan validation, collision checks, scheduler, permissions, guard, stream parsing, database schema |
+| `packages/server` | API, WebSocket events, orchestrator, agent runner, snapshots (plus an optional isolated git-worktree mode) |
+| `packages/cli` | The `asf` command (owner and agent commands, guard hook) |
+| `packages/dashboard` | React + Vite + Tailwind dashboard |
+| `packages/fake-claude` | A stand-in for `claude` used by every test |
 
-To be determined before the first public release.
+Node runs the TypeScript directly, and only the dashboard is built. Tests never call the real Claude. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [docs index](docs/README.md).
+
+---
+
+## Usage and terms
+
+AI Software Factory runs the official Claude Code CLI on your own machine, using your own Claude account and subscription (or API billing, if you configure that in Claude Code). Every agent run counts toward your Claude usage. AI Software Factory gives you budgets, a reserve, concurrency caps, and a kill switch, but **you are responsible for your usage and for complying with Anthropic's current terms of service and usage policies** for Claude and Claude Code.
+
+AI Software Factory is an independent open-source project and is **not affiliated with, endorsed by, or sponsored by Anthropic**. "Claude" and "Claude Code" are trademarks of Anthropic and are used here only to describe compatibility.
+
+AI Software Factory does not deploy software or use paid third-party services on its own. Anything that costs money or touches real external services requires your explicit approval.
+
+## Credits and license
+
+The role skills were shaped by ideas from several open-source projects; see [CREDITS.md](CREDITS.md). Logo and brand assets: [docs/brand](docs/brand/README.md).
+
+Released under the [MIT License](LICENSE).

@@ -1,10 +1,5 @@
 packages:
-  - "apps/web"
-  - "packages/contracts"
-
-# Both need a postinstall step to place a native binary: esbuild (used by Vitest) and
-# unrs-resolver (used by the ESLint import resolver). Without approval pnpm skips the
-# script and the package fails at runtime with a missing-binary error.
-allowBuilds:
-  esbuild: true
-  unrs-resolver: true
+  - "packages/*"
+onlyBuiltDependencies:
+  - esbuild
+  - "@tailwindcss/oxide"

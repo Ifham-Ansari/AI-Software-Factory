@@ -1,0 +1,19 @@
+{
+  "name": "@asf/cli",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@asf/core": "workspace:*",
+    "@asf/server": "workspace:*",
+    "yaml": "^2.9.1"
+  },
+  "bin": {
+    "asf": "./bin/asf.js"
+  },
+  "description": "The asf command for AI Software Factory"
+}
