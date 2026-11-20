@@ -24,6 +24,7 @@ export const SCREENS: { id: string; label: string; icon: string; group: string }
   { id: "preview", label: "Preview", icon: "preview", group: "Build" },
   { id: "memory", label: "Memory", icon: "memory", group: "Project" },
   { id: "usage", label: "Usage", icon: "usage", group: "Project" },
+  { id: "keys", label: "API keys", icon: "key", group: "Project" },
   { id: "settings", label: "Settings", icon: "settings", group: "Project" },
 ];
 const GROUPS = ["You", "Plan", "Build", "Project"];

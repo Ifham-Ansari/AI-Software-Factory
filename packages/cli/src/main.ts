@@ -8,7 +8,7 @@ const HELP = `asf — AI Software Factory: your local AI software team (runs on 
 Owner commands:
   asf setup [--uninstall]        install the asf command so it works from any folder
   asf init [path]                make a folder an AI Software Factory project (adds one hidden .asf folder)
-  asf doctor [--login]           check prerequisites (node, pnpm, git, docker, uv, claude)
+  asf doctor [--login] [--keys]  check prerequisites (node, pnpm, git, docker, uv, claude, API keys)
   asf up [--port N] [--no-open]  start the local server + dashboard (127.0.0.1 only)
   asf status                     phase, tasks, agents, quota for the current project
   asf pause | resume             stop/start scheduling new agent runs

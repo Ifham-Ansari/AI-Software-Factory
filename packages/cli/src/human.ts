@@ -55,13 +55,25 @@ export async function doctorChecks(): Promise<Check[]> {
   checks.push({ name: "docker + compose", ok: docker.ok && compose.ok, detail: docker.ok ? `${docker.out}; ${compose.out.split("\n")[0]}` : "not found", fix: "Install Docker Desktop or Docker Engine with the compose plugin. Agents use it for per-agent databases.", optional: true });
   const uv = probe("uv", ["--version"]);
   checks.push({ name: "uv", ok: uv.ok, detail: uv.ok ? uv.out : "not found", fix: "Install uv (https://docs.astral.sh/uv/) for the Python backend of apps AI Software Factory builds.", optional: true });
+  const { KeyStore } = await import("@asf/server");
+  const keys = new KeyStore().list();
+  const usableKeys = keys.filter((k) => !k.invalid).length;
   const claudeBin = process.env.ASF_CLAUDE_BIN ?? "claude";
   const claude = probe(claudeBin, ["--version"]);
   checks.push({
     name: "claude (Claude Code)",
     ok: claude.ok && versionAtLeast(claude.out, MIN_CLAUDE),
     detail: claude.ok ? claude.out : "not found",
-    fix: "Install Claude Code (https://docs.claude.com/en/docs/claude-code) and run `claude` once to log in with your own account.",
+    fix: "Install Claude Code (https://docs.claude.com/en/docs/claude-code) and run `claude` once to log in, or use the built-in engine with free API keys (`asf keys providers`).",
+    // With working API keys the built-in engine can run every agent, so Claude Code is not required.
+    optional: usableKeys > 0,
+  });
+  checks.push({
+    name: "API keys (built-in)",
+    ok: usableKeys > 0,
+    detail: keys.length ? `${usableKeys} of ${keys.length} working` : "none",
+    fix: "Only needed without Claude Code: `asf keys providers`, then `asf keys add <provider> --label <your name>`.",
+    optional: true,
   });
   const { portFree } = await import("@asf/server");
   const free = await portFree(4800);
@@ -94,6 +106,11 @@ async function doctor(p: Parsed): Promise<number> {
     } else console.log("Skipped. Run `claude` yourself once to confirm you are logged in.");
   } else {
     console.log("\nTip: `asf doctor --login` also confirms `claude` is logged in (sends one tiny prompt; asks first).");
+  }
+  if (p.flags.keys) {
+    console.log("\nChecking the team's API keys with each provider (uses no tokens):");
+    const { keysCommand } = await import("./keys.ts");
+    if ((await keysCommand({ positional: ["keys", "test"], flags: {} }).catch((e: Error) => (console.log(`       ${e.message}`), 1))) !== 0) bad++;
   }
   console.log(bad ? `\n${bad} required check(s) failed.` : "\nAll required checks passed.");
   return bad ? 1 : 0;

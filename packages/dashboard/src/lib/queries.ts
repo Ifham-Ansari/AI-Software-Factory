@@ -9,7 +9,9 @@ import type {
   DocDetail,
   DocRow,
   DocVersion,
+  EngineInfo,
   PlanInfo,
+  ProviderModels,
   ProjectInfo,
   ProjectListItem,
   Run,
@@ -63,6 +65,24 @@ export const useTranscript = (pid: string, rid: string | null, live: boolean) =>
     enabled: Boolean(rid) && !live,
     retry: false,
   });
+/** The team's API keys and the providers they can come from (machine-wide, not per project). */
+export const useEngine = () =>
+  useQuery({ queryKey: ["engine"], queryFn: () => api<EngineInfo>("GET", "/api/engine"), refetchInterval: 10_000 });
+export const useEngineModels = (enabled: boolean) =>
+  useQuery({
+    queryKey: ["engine", "models"],
+    queryFn: () => api<ProviderModels[]>("GET", "/api/engine/models"),
+    enabled,
+    staleTime: 300_000,
+  });
+/** A change to the team's keys; refreshes the key list and model lists. */
+export function useKeyAction<TBody = unknown, TOut = unknown>(method: string, path: (b: TBody) => string) {
+  const qc = useQueryClient();
+  return useMutation<TOut, Error, TBody>({
+    mutationFn: (body: TBody) => api<TOut>(method, path(body), method === "DELETE" ? undefined : (body ?? {})),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["engine"] }),
+  });
+}
 export const useFsHome = () =>
   useQuery({ queryKey: ["fs-home"], queryFn: () => api<FsHome>("GET", "/api/fs/home"), retry: false });
 export const usePlan = (pid: string) => useP<PlanInfo>(pid, "tasks", "/plan");

@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import fs from "node:fs";
 import path from "node:path";
 import { registerApi } from "./api.ts";
+import { sharedKeyStore, type KeyStore } from "./engine/keys.ts";
 import { EventBus, topicsFor, type AsfEvent } from "./bus.ts";
 import { initProject } from "./init.ts";
 import { buildId, DASHBOARD_DIST } from "./paths.ts";
@@ -24,12 +25,16 @@ export interface ServerOptions {
   writeInfo?: boolean;
   /** Start orchestrator loops (tests may drive ticks by hand). */
   autoStart?: boolean;
+  /** The team's API keys for the built-in engine (default: ~/.asf/keys.json). */
+  keys?: KeyStore;
 }
 
 export class AsfServer {
   readonly bus = new EventBus();
   readonly tokens: TokenStore;
   readonly projects = new Map<string, Project>();
+  /** One key store for every open project: their runs share the team's limits. */
+  readonly keys: KeyStore;
   app!: FastifyInstance;
   port = 0;
   /** The folder `asf up` was started from (or last opened from the CLI); the dashboard offers to open it. */
@@ -44,6 +49,7 @@ export class AsfServer {
     this.opts = opts;
     this.launchDir = opts.launchDir ?? null;
     this.tokens = new TokenStore(opts.token);
+    this.keys = opts.keys ?? sharedKeyStore();
   }
 
   async requestShutdown(): Promise<void> {
@@ -63,7 +69,7 @@ export class AsfServer {
       if (!o.init) throw new Error(`${root} is not an AI Software Factory project. Run \`asf init\` there, or create it from the dashboard with "initialize".`);
       await initProject(root);
     }
-    const p = await Project.open(root, { bus: this.bus, tokens: this.tokens, serverUrl: () => this.url, runner: this.opts.runnerFactory?.() });
+    const p = await Project.open(root, { bus: this.bus, tokens: this.tokens, serverUrl: () => this.url, runner: this.opts.runnerFactory?.(), keys: this.keys });
     this.projects.set(p.id, p);
     if (this.opts.autoStart !== false) p.start();
     return p;

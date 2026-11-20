@@ -119,17 +119,17 @@ export async function startHarness(
 
   const h: Partial<Harness> = { dir, root, stateDir };
   const engine = opts.runner === "engine";
+  h.keys = new KeyStore(process.env.ASF_HOME);
   if (engine) {
     // The built-in engine against a scripted OpenAI-compatible server. Test keys: "bad…" is rejected and
     // "limited…" is always rate limited by fake-llm; anything else works.
     h.fakeLlm = await startFakeLlm({ scenarioFile, stateDir });
-    h.keys = new KeyStore(process.env.ASF_HOME);
     for (const [i, key] of (opts.keys ?? ["test-key"]).entries()) h.keys.add({ provider: "custom", label: `Teammate ${i + 1}`, key, baseUrl: h.fakeLlm.url });
   }
   const runnerFactory = (): AgentRunner =>
     engine ? new EngineRunner({ keys: h.keys!, settings: () => h.project!.svc.settings }) : new ClaudeRunner(FAKE_CLAUDE);
   const boot = async () => {
-    const server = new AsfServer({ port: 0, writeInfo: false, runnerFactory, autoStart: false });
+    const server = new AsfServer({ port: 0, writeInfo: false, runnerFactory, autoStart: false, keys: h.keys });
     await server.start();
     const project = await server.openProject(root);
     project.svc.updateSettings({
