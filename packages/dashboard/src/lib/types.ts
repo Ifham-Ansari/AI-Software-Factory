@@ -140,6 +140,7 @@ export interface Settings {
   /** Built-in engine: models to try in order, as provider:model. */
   engine_models?: { strong: string[]; fast: string[] };
   engine_context_tokens?: number;
+  engine_max_turns?: number;
 }
 
 export interface ProviderPreset {
@@ -483,8 +484,10 @@ export interface PlanInfo {
     peakByRole: Record<string, number>;
   } | null;
   estimate: {
-    byRole: Record<string, { tasks: number; perRun: number; tokens: number }>;
+    byRole: Record<string, { tasks: number; perRun: number; tokens: number; requests?: number }>;
     totalTokens: number;
+    /** API requests (turns): what free tiers limit per day. */
+    totalRequests?: number;
   };
   team: Record<string, number>;
 }

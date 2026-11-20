@@ -81,8 +81,10 @@ export const settingsSchema = z.object({
   engine_models: z
     .object({ strong: z.array(z.string()).default([]), fast: z.array(z.string()).default([]) })
     .default({ strong: [], fast: [] }),
-  /** Built-in engine: the conversation is trimmed to about this many tokens per request. */
-  engine_context_tokens: z.number().int().min(4000).default(32_000),
+  /** Built-in engine: each request (system prompt included) is trimmed to about this many tokens. */
+  engine_context_tokens: z.number().int().min(8000).default(32_000),
+  /** Built-in engine: turns per run. Free tiers count requests per day, so a confused run stops early. */
+  engine_max_turns: z.number().int().min(5).default(50),
   /**
    * direct: agents edit the project folder itself (like Claude Code); AI Software Factory commits each finished task.
    * isolated: each task gets its own git worktree and branch, merged into asf/integration.

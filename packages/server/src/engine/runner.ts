@@ -1,9 +1,13 @@
 import {
   compactMessages,
+  ENGINE_NUDGE,
   ENGINE_PREAMBLE,
   ENGINE_TOOL_NAMES,
   ENGINE_TOOLS,
+  engineCallId,
+  estimateTokens,
   guardDecision,
+  normalizeToolCall,
   parseModelRef,
   parseStreamLine,
   pickKey,
@@ -27,6 +31,8 @@ import { runTool, type ToolOutcome } from "./tools.ts";
 export interface EngineSettings {
   engine_models: { strong: string[]; fast: string[] };
   engine_context_tokens: number;
+  /** Turns per run for the built-in engine (the role's own limit still applies when lower). */
+  engine_max_turns?: number;
 }
 
 export interface EngineRunnerOptions {
@@ -51,6 +57,8 @@ interface Call {
 }
 
 const MAX_NETWORK_RETRIES = 3;
+/** Never trim the conversation below this, however big the system prompt is. */
+const MIN_HISTORY_TOKENS = 4000;
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -67,12 +75,15 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function normalizeCalls(raw: ToolCallMsg[] | undefined, turn: number): { calls: Call[]; history: ToolCallMsg[] } {
+/**
+ * The model's tool calls, cleaned up: our own ids (valid for every provider, so a run can switch provider), tool
+ * and argument names mapped to the real ones, and arguments parsed (a parse error goes back to the model).
+ */
+function normalizeCalls(raw: ToolCallMsg[] | undefined, messageIndex: number): { calls: Call[]; history: ToolCallMsg[] } {
   const calls: Call[] = [];
   const history: ToolCallMsg[] = [];
   (raw ?? []).forEach((c, i) => {
-    const id = c.id || `call_${turn}_${i}`;
-    const name = String(c.function?.name ?? "");
+    const id = engineCallId(messageIndex, i);
     const args = String(c.function?.arguments ?? "") || "{}";
     let input: Record<string, any> = {};
     let parseError: string | undefined;
@@ -83,8 +94,9 @@ function normalizeCalls(raw: ToolCallMsg[] | undefined, turn: number): { calls: 
     } catch (e) {
       parseError = (e as Error).message;
     }
-    calls.push({ id, name, input, parseError });
-    history.push({ id, type: "function", function: { name, arguments: args } });
+    const n = normalizeToolCall(String(c.function?.name ?? ""), input);
+    calls.push({ id, name: n.name, input: n.input, parseError });
+    history.push({ id, type: "function", function: { name: n.name, arguments: parseError ? args : JSON.stringify(n.input) } });
   });
   return { calls, history };
 }
@@ -188,14 +200,20 @@ export class EngineRunner implements AgentRunner {
     let isError = false;
     let subtype = "success";
     let resultText = "";
+    // The context budget covers the whole request, so the (large) system prompt counts against it.
+    const systemTokens = estimateTokens([{ role: "system", content: system }]);
     let budget = settings.engine_context_tokens;
     let retries = 0;
+    let usedTool = false;
+    let nudged = false;
+    // Free tiers count requests per day: the engine's own cap stops a confused run early.
+    const maxTurns = Math.min(spec.maxTurns, settings.engine_max_turns ?? spec.maxTurns);
 
     while (!e.ac.signal.aborted) {
-      if (turns >= spec.maxTurns) {
+      if (turns >= maxTurns) {
         isError = true;
         subtype = "error_max_turns";
-        resultText = `Reached the turn limit (${spec.maxTurns}).`;
+        resultText = `Reached the turn limit (${maxTurns}).`;
         break;
       }
       const pick = pickKey(chain, this.opts.keys.list(), this.opts.keys.state);
@@ -212,7 +230,7 @@ export class EngineRunner implements AgentRunner {
         baseUrl: this.opts.keys.baseUrl(key),
         apiKey: key.key,
         model: pick.model,
-        messages: [{ role: "system", content: system }, ...compactMessages(history, budget)],
+        messages: [{ role: "system", content: system }, ...compactMessages(history, Math.max(MIN_HISTORY_TOKENS, budget - systemTokens))],
         tools: ENGINE_TOOLS,
         signal: e.ac.signal,
         testHeaders,
@@ -246,7 +264,7 @@ export class EngineRunner implements AgentRunner {
       usage.cacheRead += r.usage.cacheRead;
       this.opts.keys.recordUsage(key.id, r.usage.input + r.usage.cacheRead, r.usage.output);
 
-      const { calls, history: callHistory } = normalizeCalls(r.message.tool_calls, turns);
+      const { calls, history: callHistory } = normalizeCalls(r.message.tool_calls, history.length);
       const text = (r.message.content ?? "").trim();
       emit({
         type: "assistant",
@@ -258,11 +276,19 @@ export class EngineRunner implements AgentRunner {
           usage: { input_tokens: r.usage.input, output_tokens: r.usage.output, cache_read_input_tokens: r.usage.cacheRead, cache_creation_input_tokens: 0 },
         },
       });
-      history.push({ role: "assistant", content: r.message.content ?? null, ...(callHistory.length ? { tool_calls: callHistory } : {}) });
+      // Content is always a string (some providers reject null), and never empty without tool calls.
+      history.push(callHistory.length ? { role: "assistant", content: text, tool_calls: callHistory } : { role: "assistant", content: text || "Done." });
       if (!calls.length) {
+        if (!usedTool && !nudged) {
+          // A weaker model described the work instead of doing it: ask once, then accept its answer.
+          nudged = true;
+          history.push({ role: "user", content: ENGINE_NUDGE });
+          continue;
+        }
         resultText = text || "Done.";
         break;
       }
+      usedTool = true;
       for (const c of calls) {
         let outcome: ToolOutcome;
         if (e.ac.signal.aborted) outcome = { ok: false, output: "The run was stopped." };

@@ -774,7 +774,7 @@ export function registerApi(app: FastifyInstance, srv: AsfServer): void {
       const p = project(req);
       const tasks = p.svc.tasks({ kind: ["build"] });
       const stats = tasks.length ? planStats(tasks) : null;
-      const est = estimateBuild(stats?.byRole ?? {}, p.svc.avgTokensByRole(), p.svc.settings.qa_per_task);
+      const est = estimateBuild(stats?.byRole ?? {}, p.svc.avgTokensByRole(), p.svc.settings.qa_per_task, p.svc.avgTurnsByRole());
       return { tasks: tasks.map(({ source: _s, body: _b, ...t }) => t), stats, estimate: est, team: p.svc.settings.team };
     }),
   );

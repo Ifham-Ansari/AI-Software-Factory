@@ -2,6 +2,7 @@
 // the same scenario files as fake-claude (ASF_FAKE_SCENARIO), but as tool calls the engine really executes
 // (Write, Bash, TodoWrite), so tests exercise the engine's tools, guard, and loop. The engine tells it which run
 // is asking through x-asf-* headers, which it sends only when a fake scenario is set.
+import { ENGINE_NUDGE } from "@asf/core";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -19,7 +20,11 @@ type Step =
   | { notLoggedIn: true }
   | { exit: number }
   | { expectPrompt: string }
-  | { rateLimit: { status: string; inSeconds?: number } };
+  | { rateLimit: { status: string; inSeconds?: number } }
+  /** Like a weaker model: a reply with text and no tool call (the engine nudges once). */
+  | { say: string }
+  /** Any tool call, as a model might name it ("read_file", "bash", …). */
+  | { call: { name: string; input: Record<string, unknown> } };
 
 interface Script {
   steps: Step[];
@@ -31,6 +36,7 @@ interface Script {
 type Action =
   | { kind: "tool"; name: string; input: Record<string, unknown>; text?: string; delayMs?: number }
   | { kind: "final"; text: string; delayMs?: number }
+  | { kind: "say"; text: string; delayMs?: number }
   | { kind: "error"; status: number; body: string; headers?: Record<string, string>; delayMs?: number }
   | { kind: "hang" };
 
@@ -67,6 +73,9 @@ function actionsFor(script: Script, ctx: Record<string, string>): { actions: Act
     else if ("bash" in s) push({ kind: "tool", name: "Bash", input: { command: expand(s.bash, ctx) } });
     else if ("asf" in s) push({ kind: "tool", name: "Bash", input: { command: `asf ${s.asf.map((a) => shq(expand(a, ctx))).join(" ")}` } });
     else if ("todo" in s) push({ kind: "tool", name: "TodoWrite", input: { todos: s.todo } });
+    else if ("say" in s) push({ kind: "say", text: expand(s.say, ctx) });
+    else if ("call" in s)
+      push({ kind: "tool", name: s.call.name, input: Object.fromEntries(Object.entries(s.call.input).map(([k, v]) => [k, typeof v === "string" ? expand(v, ctx) : v])) });
     else if ("hang" in s) push({ kind: "hang" });
     else if ("usageLimit" in s)
       push({ kind: "error", status: 429, body: JSON.stringify({ error: { message: "Rate limit reached" } }), headers: { "retry-after": String(s.usageLimit.inSeconds ?? 3600) } });
@@ -132,7 +141,8 @@ export async function startFakeLlm(opts: { scenarioFile: string; stateDir: strin
         return send(400, { error: { message: "bad json" } });
       }
       const messages: any[] = body.messages ?? [];
-      const lastUser = messages.map((m) => m.role).lastIndexOf("user");
+      // The engine's nudge is not a new prompt: the script carries on where it was.
+      const lastUser = messages.map((m) => (m.role === "user" && m.content === ENGINE_NUDGE ? "nudge" : m.role)).lastIndexOf("user");
       const prompt = String(messages[lastUser]?.content ?? "");
       const h: Record<string, string> = {};
       for (const [k, v] of Object.entries(req.headers)) if (k.startsWith("x-asf-")) h[k] = String(v);

@@ -4,6 +4,7 @@ import { compactMessages, estimateTokens, type ChatMessage } from "./compact.ts"
 import { classifyProviderError, parseDurationMs, rateLimitResetAt } from "./errors.ts";
 import { pickKey, type PoolKey } from "./pool.ts";
 import { maskKey, parseModelRef } from "./providers.ts";
+import { engineCallId, normalizeToolCall } from "./tools.ts";
 
 const NOW = 1_900_000_000_000;
 
@@ -102,6 +103,24 @@ describe("compaction", () => {
     const callIds = out.flatMap((x) => (x.role === "assistant" ? (x.tool_calls ?? []).map((c) => c.id) : []));
     const resultIds = out.flatMap((x) => (x.role === "tool" ? [x.tool_call_id] : []));
     expect(resultIds).toEqual(callIds);
+  });
+});
+
+describe("tool calls from weaker models", () => {
+  it("maps common tool and argument names to the real ones", () => {
+    expect(normalizeToolCall("read_file", { path: "a.ts" })).toEqual({ name: "Read", input: { file_path: "a.ts" } });
+    expect(normalizeToolCall("bash", { cmd: "ls" })).toEqual({ name: "Bash", input: { command: "ls" } });
+    expect(normalizeToolCall("str_replace", { path: "a", old_str: "x", new_str: "y" })).toEqual({ name: "Edit", input: { file_path: "a", old_string: "x", new_string: "y" } });
+    expect(normalizeToolCall("WRITE", { file_path: "a", text: "t" })).toEqual({ name: "Write", input: { file_path: "a", content: "t" } });
+    // The real name wins over an alias when both are given; unknown tools pass through.
+    expect(normalizeToolCall("Read", { file_path: "a", path: "b" }).input).toEqual({ file_path: "a", path: "b" });
+    expect(normalizeToolCall("fly", { x: 1 })).toEqual({ name: "fly", input: { x: 1 } });
+  });
+
+  it("makes call ids every provider accepts (9 letters and digits)", () => {
+    expect(engineCallId(3, 0)).toMatch(/^[a-zA-Z0-9]{9}$/);
+    expect(engineCallId(12345, 7)).toBe("c12345x07");
+    expect(engineCallId(4, 1)).not.toBe(engineCallId(5, 1));
   });
 });
 

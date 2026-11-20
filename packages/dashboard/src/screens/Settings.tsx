@@ -30,7 +30,7 @@ export function SettingsScreen({ pid }: { pid: string }) {
   const project = useProject(pid);
   return (
     <div className="max-w-5xl">
-      <PageHeader title="Settings" kicker="scheduler · budget · gates · models · safety · skills" />
+      <PageHeader title="Settings" kicker="engine · scheduler · budget · gates · models · safety · skills" />
       <Loadable q={project} rows={10}>
         {(p) => <SettingsForm key={p.id} pid={pid} p={p} />}
       </Loadable>
@@ -490,17 +490,35 @@ function EngineSection({
                 .join(" · ")}
             </div>
           )}
-          <Row label="Context per request" hint="Older steps are trimmed to stay under this. Lower it if a provider's per-minute token limit is small." htmlFor="s-ctx">
+          <Row
+            label="Size of each request"
+            hint="Instructions plus recent steps; older steps are trimmed to stay under this. Lower it if a provider's per-minute token limit is small."
+            htmlFor="s-ctx"
+          >
             <input
               id="s-ctx"
               type="number"
-              min={4000}
+              min={8000}
               step={1000}
               className="field mono w-32"
               value={draft.engine_context_tokens ?? 32000}
               onChange={(e) => set("engine_context_tokens", Number(e.target.value) || 32000)}
             />
             <span className="ml-2 text-[12px] text-ink-3">tokens</span>
+          </Row>
+          <Row
+            label="Turns per run"
+            hint="Each turn is one request. Free tiers limit requests per day, so a confused agent stops here (a role's own lower limit still applies)."
+            htmlFor="s-eturns"
+          >
+            <input
+              id="s-eturns"
+              type="number"
+              min={5}
+              className="field mono w-32"
+              value={draft.engine_max_turns ?? 50}
+              onChange={(e) => set("engine_max_turns", Number(e.target.value) || 50)}
+            />
           </Row>
         </>
       )}

@@ -866,6 +866,11 @@ export class ProjectService {
     };
   }
 
+  avgTurnsByRole(): Record<string, number> {
+    const rows = this.db.all("SELECT role, AVG(turns) AS avg FROM runs WHERE ended_at IS NOT NULL AND result_status = 'success' GROUP BY role");
+    return Object.fromEntries(rows.filter((r) => r.avg > 0).map((r) => [r.role, Math.round(r.avg)]));
+  }
+
   avgTokensByRole(): Record<string, number> {
     const rows = this.db.all("SELECT role, AVG(input_tokens + output_tokens + cache_creation_tokens) AS avg FROM runs WHERE ended_at IS NOT NULL AND result_status = 'success' GROUP BY role");
     return Object.fromEntries(rows.filter((r) => r.avg > 0).map((r) => [r.role, Math.round(r.avg)]));

@@ -6,7 +6,8 @@ export interface ToolDef {
   function: { name: string; description: string; parameters: Record<string, unknown> };
 }
 
-const obj = (properties: Record<string, unknown>, required: string[]) => ({ type: "object", properties, required, additionalProperties: false });
+// No additionalProperties: some providers (Gemini) reject schema keywords outside a small subset.
+const obj = (properties: Record<string, unknown>, required: string[]) => ({ type: "object", properties, required });
 const str = (description: string) => ({ type: "string", description });
 const int = (description: string) => ({ type: "integer", description });
 const bool = (description: string) => ({ type: "boolean", description });
@@ -17,7 +18,7 @@ export const ENGINE_TOOLS: ToolDef[] = [
     function: {
       name: "Read",
       description: "Read a text file. Returns numbered lines. Use offset/limit for large files.",
-      parameters: obj({ file_path: str("Path to the file (relative to the working folder, or absolute)"), offset: int("First line to read, 1-based"), limit: int("Number of lines to read (default 2000)") }, ["file_path"]),
+      parameters: obj({ file_path: str("Path to the file (relative to the working folder, or absolute)"), offset: int("First line to read, 1-based"), limit: int("Number of lines to read (default 800)") }, ["file_path"]),
     },
   },
   {
@@ -100,15 +101,83 @@ export const ENGINE_TOOLS: ToolDef[] = [
 
 export const ENGINE_TOOL_NAMES = ENGINE_TOOLS.map((t) => t.function.name);
 
-/** Caps that keep one tool result from flooding a small model's context. */
+/**
+ * Caps that keep one tool result from flooding a small model's context. Free tiers count every token of every
+ * request against small per-minute limits, so results are kept short and the model pages through big files.
+ */
 export const TOOL_CAPS = {
-  readLines: 2000,
-  readChars: 60_000,
-  bashChars: 30_000,
-  listResults: 200,
+  readLines: 800,
+  readChars: 30_000,
+  bashChars: 12_000,
+  listResults: 100,
   bashTimeoutSeconds: 300,
   bashMaxTimeoutSeconds: 600,
 };
+
+const TOOL_ALIASES: Record<string, string> = {
+  read: "Read",
+  read_file: "Read",
+  view: "Read",
+  cat: "Read",
+  write: "Write",
+  write_file: "Write",
+  create_file: "Write",
+  edit: "Edit",
+  edit_file: "Edit",
+  str_replace: "Edit",
+  replace: "Edit",
+  bash: "Bash",
+  shell: "Bash",
+  run: "Bash",
+  run_command: "Bash",
+  execute_command: "Bash",
+  terminal: "Bash",
+  grep: "Grep",
+  search: "Grep",
+  search_files: "Grep",
+  glob: "Glob",
+  find_files: "Glob",
+  list_files: "Glob",
+  todowrite: "TodoWrite",
+  todo_write: "TodoWrite",
+  todo: "TodoWrite",
+};
+
+const ARG_ALIASES: Record<string, Record<string, string>> = {
+  Read: { path: "file_path", file: "file_path", filename: "file_path" },
+  Write: { path: "file_path", file: "file_path", filename: "file_path", text: "content", contents: "content" },
+  Edit: { path: "file_path", file: "file_path", old_str: "old_string", new_str: "new_string", old: "old_string", new: "new_string" },
+  Bash: { cmd: "command", script: "command" },
+  Grep: { regex: "pattern", query: "pattern" },
+  Glob: { glob: "pattern" },
+};
+
+/**
+ * Smaller models often name tools and arguments their own way ("read_file", "path", "cmd"). Map the common
+ * variants to the real names, so the guard and the tools see what they expect. Unknown names pass through.
+ */
+export function normalizeToolCall(name: string, input: Record<string, unknown>): { name: string; input: Record<string, unknown> } {
+  const canonical = ENGINE_TOOL_NAMES.find((n) => n.toLowerCase() === name.toLowerCase()) ?? TOOL_ALIASES[name.toLowerCase()] ?? name;
+  const aliases = ARG_ALIASES[canonical];
+  if (!aliases) return { name: canonical, input };
+  const out: Record<string, unknown> = { ...input };
+  for (const [from, to] of Object.entries(aliases)) {
+    if (out[to] === undefined && out[from] !== undefined) {
+      out[to] = out[from];
+      delete out[from];
+    }
+  }
+  return { name: canonical, input: out };
+}
+
+/**
+ * Tool call ids the engine writes into the conversation: 9 letters and digits, the strictest format a provider
+ * asks for (Mistral), so a run can move to any provider mid-conversation. Unique across resumed runs because the
+ * index is the conversation's length.
+ */
+export function engineCallId(messageIndex: number, callIndex: number): string {
+  return `c${String(messageIndex % 100_000).padStart(5, "0")}x${String(callIndex % 100).padStart(2, "0")}`;
+}
 
 /** Added before the role's skills: how to work with these tools. Kept short, every request pays for it. */
 export const ENGINE_PREAMBLE = [
@@ -119,3 +188,7 @@ export const ENGINE_PREAMBLE = [
   "When the work is done (or you are blocked and have said so with the asf CLI), reply with a one-line summary and no tool call: that ends the run.",
   "",
 ].join("\n");
+
+/** Sent once when a model stops before using any tool: weaker models sometimes describe the work instead of doing it. */
+export const ENGINE_NUDGE =
+  "You replied without calling a tool, so nothing has been done yet. Do the task now by calling tools (Read, Write, Edit, Bash, …). Reply without a tool call only when the work is finished.";

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Badge, Empty, Loadable, Modal, PageHeader, toast, toastError } from "../components/ui";
 import { api } from "../lib/api";
-import { fmtTokens } from "../lib/format";
+import { fmtTokens, plural } from "../lib/format";
 import { useEngine, useKeyAction, useProject } from "../lib/queries";
 import { href } from "../lib/router";
 import type { KeyView, ProviderPreset } from "../lib/types";
@@ -189,7 +189,7 @@ function KeyList({ keys, providers }: { keys: KeyView[]; providers: ProviderPres
                 {k.label} <span className="font-normal text-ink-3">· {name(k.provider)}</span>
               </div>
               <div className="mono text-[11.5px] text-ink-3">
-                {k.masked} · {k.usageToday.requests} requests today · {fmtTokens(k.usageToday.input + k.usageToday.output)} tokens
+                {k.masked} · {plural(k.usageToday.requests, "request")} today · {fmtTokens(k.usageToday.input + k.usageToday.output)} tokens
               </div>
               {k.invalid && <div className="mono mt-0.5 text-[11.5px] text-danger">{k.invalid}</div>}
             </div>
@@ -266,7 +266,7 @@ function TeamUsage({ keys }: { keys: KeyView[] }) {
           <li key={label} className="flex gap-3">
             <span className="w-40 font-medium">{label}</span>
             <span className="mono text-[12px] text-ink-2">
-              {r.keys} {r.keys === 1 ? "key" : "keys"} · {r.requests} requests · {fmtTokens(r.tokens)} tokens
+              {plural(r.keys, "key")} · {plural(r.requests, "request")} · {fmtTokens(r.tokens)} tokens
             </span>
           </li>
         ))}

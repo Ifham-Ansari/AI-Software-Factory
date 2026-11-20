@@ -89,9 +89,10 @@ const SCENARIO = {
   },
 };
 
-describe("1. happy path through every phase (fake claude)", () => {
+// The same full track with each engine: Claude Code (fake claude) and the built-in engine (fake llm).
+describe.each(["claude", "engine"] as const)("1. happy path through every phase (%s)", (runner) => {
   it("idea → PRD → design → architecture → plan → 6 tasks in 2 lanes → release → done", async () => {
-    h = await startHarness(SCENARIO);
+    h = await startHarness(SCENARIO, { runner });
     const svc = h.project.svc;
     const phase = (p: string) => () => svc.phase === p;
 

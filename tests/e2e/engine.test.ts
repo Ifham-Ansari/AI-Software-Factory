@@ -126,6 +126,35 @@ describe("built-in engine (fake llm)", () => {
     expect(JSON.stringify(session.messages)).toMatch(/Use the test key for payments/);
   });
 
+  it("a weaker model: its own tool names still work, and a reply without tools gets one nudge", async () => {
+    h = await startHarness(
+      {
+        ...DEFAULT_BUILD_SCENARIO,
+        "backend:implement": {
+          steps: [
+            { say: "I will create the file for ${ASF_TASK} now." },
+            { asf: ["task", "start", "${ASF_TASK}"] },
+            { call: { name: "write_file", input: { path: "src/${ASF_TASK}.txt", text: "work of ${ASF_TASK}\n" } } },
+            { call: { name: "read_file", input: { path: "src/${ASF_TASK}.txt" } } },
+            ...implementSteps().slice(3),
+          ],
+        },
+      },
+      { runner: "engine", workspace: "direct" },
+    );
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
+    await waitFor(done("T001"), "T001 done");
+    expect(fs.readFileSync(path.join(h.root, "src/T001.txt"), "utf8").replace(/\r\n/g, "\n")).toBe("work of T001\n");
+    const impl = h.project.svc.runs({ task: "T001" }).find((r) => r.stage === "implement")!;
+    const stream = streamOf(impl.id);
+    // The feed and transcript see the real tool names, with ids every provider accepts.
+    expect(stream).toMatch(/"type":"tool_use","id":"c\d{5}x\d{2}","name":"Write","input":\{"file_path":"src\/T001.txt"/);
+    expect(stream).toMatch(/"name":"Read"/);
+    expect(stream).not.toMatch(/"name":"write_file"/);
+    const session = JSON.parse(fs.readFileSync(path.join(h.project.paths.asf, "sessions", `${impl.session_id}.json`), "utf8"));
+    expect(session.messages.filter((m: { content?: string }) => /replied without calling a tool/.test(m.content ?? ""))).toHaveLength(1);
+  });
+
   it("the kill switch stops engine runs at once and the tasks keep their place", async () => {
     h = await startHarness(
       { ...DEFAULT_BUILD_SCENARIO, "backend:implement": { steps: [{ asf: ["task", "start", "${ASF_TASK}"] }, { hang: true }] } },
