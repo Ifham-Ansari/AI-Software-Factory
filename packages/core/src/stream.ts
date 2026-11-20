@@ -12,6 +12,8 @@ export type StreamEvent =
   | { kind: "tool_result"; toolUseId?: string; isError: boolean; text: string }
   | { kind: "retry"; error: string; attempt?: number; delayMs?: number }
   | { kind: "rate_limit"; status: string; resetsAt?: number }
+  /** Claude Code has no usable login (not logged in, expired OAuth session, invalid API key). */
+  | { kind: "auth_error"; text: string }
   | {
       kind: "result";
       subtype: string;
@@ -22,6 +24,8 @@ export type StreamEvent =
       sessionId?: string;
       text: string;
       usageLimit?: { resetsAt?: number };
+      /** The run failed because Claude Code is not logged in. */
+      authFailed?: boolean;
     };
 
 function short(s: string, n = 120): string {
@@ -166,6 +170,15 @@ export function isUsageLimitText(text: string): boolean {
   return LIMIT_RE.test(text);
 }
 
+// What Claude Code prints when it has no usable login: "Not logged in · Please run /login", "Invalid API key · Please
+// run /login", "Failed to authenticate: OAuth session expired and could not be refreshed", "OAuth token has expired…",
+// and the API's 401 body. Anchored at the start so an agent's own words about a /login page never match.
+const AUTH_RE = /^\s*(not logged in|invalid api key|failed to authenticate|oauth token (has )?expired|please run \/login)|^\s*api error: 401\b|"type"\s*:\s*"authentication_error"/i;
+
+export function isAuthErrorText(text: string): boolean {
+  return AUTH_RE.test(text);
+}
+
 export function parseStreamLine(line: string): StreamEvent[] {
   const trimmed = line.trim();
   if (!trimmed.startsWith("{")) return [];
@@ -193,6 +206,11 @@ export function parseStreamLine(line: string): StreamEvent[] {
       break;
     }
     case "assistant": {
+      // Claude Code reports a login failure as a synthetic assistant message tagged `error: "authentication_failed"`.
+      if (ev.error === "authentication_failed") {
+        const text = (ev.message?.content ?? []).map((b: any) => (b?.type === "text" ? String(b.text ?? "") : "")).join(" ").trim();
+        out.push({ kind: "auth_error", text: short(text || "authentication failed", 400) });
+      }
       if (ev.message?.usage) out.push({ kind: "usage", usage: toUsage(ev.message.usage) });
       for (const block of ev.message?.content ?? []) {
         if (block?.type === "tool_use") {
@@ -232,6 +250,7 @@ export function parseStreamLine(line: string): StreamEvent[] {
         sessionId: ev.session_id,
         text: short(text, 400),
         usageLimit: limited ? { resetsAt: parseResetTime(text) } : undefined,
+        authFailed: isError && isAuthErrorText(text) ? true : undefined,
       });
       break;
     }

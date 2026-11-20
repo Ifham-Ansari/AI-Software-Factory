@@ -45,7 +45,7 @@ claude -p
 | Event | Shape relied on | Becomes |
 |---|---|---|
 | `{"type":"system","subtype":"init"}` | `session_id`, `model`, `tools` | `run.init` event; session id stored on the run |
-| `{"type":"assistant"}` | `message.content[]` blocks: `tool_use` (`id`, `name`, `input`) and `text` | `run.tool` with a human summary ("Editing \`backend/app/api/orders.py\`", "Running \`pytest -q\`"); `run.text` (first ~200 chars, only if meaningful); the agent card's live action and file |
+| `{"type":"assistant"}` | `message.content[]` blocks: `tool_use` (`id`, `name`, `input`) and `text`; top-level `error: "authentication_failed"` on the synthetic message Claude Code prints without a login | `run.tool` with a human summary ("Editing \`backend/app/api/orders.py\`", "Running \`pytest -q\`"); `run.text` (first ~200 chars, only if meaningful); the agent card's live action and file; login-failure detection |
 | `{"type":"user"}` | `message.content[]` `tool_result` with `is_error` | Guard blocks surface as `run.blocked` |
 | `{"type":"system","subtype":"api_retry"}` | `error`, `attempt`, `retry_delay_ms` | `run.retry` |
 | `{"type":"rate_limit_event"}` | `rate_limit_info.status`, `resetsAt` (epoch seconds) | Only `status: "rejected"` is treated as a limit. The field set is **not documented**; parsing is tolerant |
@@ -54,6 +54,8 @@ claude -p
 The full raw stream of every run is kept in `.asf/runs/<run>/stream.jsonl` (gitignored) and is viewable on the Agents screen.
 
 **Usage limits.** The exact print-mode text of a subscription limit is not documented. AI Software Factory treats an error result whose text matches `usage limit|session limit|weekly limit|hit your … limit|rate limit|Claude AI usage limit reached` as a limit, and reads a reset time from `…|<epoch>` or "resets 3:45pm" when present (default: one hour). It then pauses scheduling (`state.limitedUntil`), alerts the owner, and resumes automatically after the reset unless `auto_resume_after_limit` is off. Interrupted tasks are resumed on the same session.
+
+**Not logged in.** Without a usable login, Claude Code 2.1 prints a synthetic assistant message tagged `error: "authentication_failed"`, then an error result whose text is "Not logged in · Please run /login" or "Failed to authenticate: OAuth session expired and could not be refreshed". This happens within a second of starting. AI Software Factory recognizes either line, ends the run as `auth_failed`, pauses scheduling with the reason "Claude Code is not logged in", and alerts the owner once. The run does not count against its task, so the task neither gets a failure nor becomes blocked. See `docs/decisions/0013-logged-out-claude-pauses.md`.
 
 **Quota.** There is no supported non-interactive command that reports subscription quota (`claude auth status` reports auth only). AI Software Factory therefore tracks its own usage from `result` events and enforces the owner's daily budget and reserve itself.
 

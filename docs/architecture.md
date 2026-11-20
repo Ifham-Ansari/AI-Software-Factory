@@ -83,7 +83,7 @@ Usage comes from `result` events (input + output + cache-creation tokens count a
 
 ## Runaway guards and the kill switch
 
-`--max-turns` per role, a wall-clock timeout per run, three failed verifies or three runs that end without finishing → the task is blocked and the owner alerted. The **kill switch** (`asf stop` or the header button) pauses scheduling and kills every agent process tree (`taskkill /T /F` on Windows, process-group `SIGKILL` elsewhere); interrupted tasks keep their session so they resume where they stopped. On restart, any run without an end time is marked interrupted.
+`--max-turns` per role, a wall-clock timeout per run, three failed verifies or three runs that end without finishing → the task is blocked and the owner alerted. A run that fails because Claude Code is not logged in does not count toward that limit. It pauses scheduling with the reason "Claude Code is not logged in" and alerts the owner once (see `docs/decisions/0013-logged-out-claude-pauses.md`). The **kill switch** (`asf stop` or the header button) pauses scheduling and kills every agent process tree (`taskkill /T /F` on Windows, process-group `SIGKILL` elsewhere); interrupted tasks keep their session so they resume where they stopped. On restart, any run without an end time is marked interrupted.
 
 ## Agent runner interface
 

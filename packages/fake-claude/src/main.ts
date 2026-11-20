@@ -20,6 +20,7 @@ type Step =
   | { sleep: number }
   | { hang: true }
   | { usageLimit: { inSeconds?: number } }
+  | { notLoggedIn: true }
   | { exit: number }
   | { expectPrompt: string }
   | { rateLimit: { status: string; inSeconds?: number } };
@@ -225,6 +226,11 @@ async function main(): Promise<number> {
     } else if ("usageLimit" in s) {
       const resets = Math.floor(Date.now() / 1000) + (s.usageLimit.inSeconds ?? 3600);
       return finish(true, `Claude AI usage limit reached|${resets}`, 1);
+    } else if ("notLoggedIn" in s) {
+      // What Claude Code 2.1 prints without a usable login: a synthetic assistant message, then an error result.
+      const text = "Not logged in · Please run /login";
+      out({ type: "assistant", session_id: sessionId, error: "authentication_failed", is_api_error_message: true, message: { role: "assistant", model: "<synthetic>", content: [{ type: "text", text }] } });
+      return finish(true, text, 1, "success");
     } else if ("exit" in s) {
       return finish(true, `fake-claude exiting with ${s.exit}`, s.exit);
     }

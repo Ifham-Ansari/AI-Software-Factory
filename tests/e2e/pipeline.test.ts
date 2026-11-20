@@ -207,6 +207,33 @@ describe("pipeline (fake claude)", () => {
     expect(be[1].resume).toBe(be[0].sessionId);
   });
 
+  it("7b. a logged-out Claude Code pauses the team without failing the task, and Resume continues it", async () => {
+    h = await startHarness({
+      ...DEFAULT_BUILD_SCENARIO,
+      "backend:implement": [{ steps: [{ notLoggedIn: true }] }, { steps: implementSteps() }],
+    });
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
+    await waitFor(() => h!.project.svc.state.paused, "paused on the login failure");
+    const st = h.project.svc.state;
+    expect(st.pauseReason).toBe("Claude Code is not logged in");
+    expect(st.alerts?.filter((a) => /not logged in/.test(a.text))).toHaveLength(1);
+    expect(st.alerts?.at(-1)?.text).toMatch(/type \/login/);
+    const t = h.project.svc.task("T001")!;
+    expect(t.status).not.toBe("blocked");
+    expect(t.run_failures).toBe(0);
+    expect(h.project.svc.runs({ limit: 100 }).find((r) => r.task === "T001")?.result_status).toBe("auth_failed");
+    // Nothing else starts while logged out.
+    const runsAtPause = h.project.svc.runs({ limit: 100 }).length;
+    await new Promise((r) => setTimeout(r, 800));
+    expect(h.project.svc.runs({ limit: 100 }).length).toBe(runsAtPause);
+    // After logging in, the owner clicks Resume: the task starts again, fresh, and finishes.
+    h.project.orch.resume();
+    await waitFor(done("T001"), "T001 done after resume");
+    const be = h.invocations().filter((i) => i.task === "T001" && i.role === "backend");
+    expect(be).toHaveLength(2);
+    expect(be[1].resume).toBeNull();
+  });
+
   it("8. kill switch: every process is gone within 2 seconds and state is consistent after restart", async () => {
     h = await startHarness({ ...DEFAULT_BUILD_SCENARIO, "backend:implement": { steps: [{ asf: ["task", "start", "${ASF_TASK}"] }, { hang: true }] } }, { settings: { max_concurrent_agents: 3 } });
     await seedBuild(h, {

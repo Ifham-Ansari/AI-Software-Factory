@@ -132,6 +132,23 @@ describe("stream parsing", () => {
     expect(new Date(parseResetTime("You've hit your session limit · resets 3:45pm", now)!).getHours()).toBe(15);
   });
 
+  it("detects a logged-out Claude Code", () => {
+    // The two lines Claude Code 2.1 prints without a usable login (trimmed to the fields that matter).
+    const msg = parseStreamLine(
+      JSON.stringify({ type: "assistant", error: "authentication_failed", is_api_error_message: true, message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] } }),
+    );
+    expect(msg[0]).toEqual({ kind: "auth_error", text: "Not logged in · Please run /login" });
+    for (const text of ["Not logged in · Please run /login", "Failed to authenticate: OAuth session expired and could not be refreshed", "Invalid API key · Please run /login"]) {
+      const res = parseStreamLine(JSON.stringify({ type: "result", subtype: "success", is_error: true, num_turns: 1, result: text }));
+      expect(res[0]).toMatchObject({ kind: "result", isError: true, authFailed: true });
+    }
+    // An agent talking about a login page, or an ordinary failure, is not a login problem.
+    const ok = parseStreamLine(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "Not logged in users are redirected to /login." }));
+    expect(ok[0]).toMatchObject({ authFailed: undefined });
+    const fail = parseStreamLine(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: "The tests fail: users not logged in see a 500 on /login" }));
+    expect(fail[0]).toMatchObject({ authFailed: undefined });
+  });
+
   it("ignores non-JSON lines", () => {
     expect(parseStreamLine("hello")).toEqual([]);
   });

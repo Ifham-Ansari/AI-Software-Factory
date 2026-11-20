@@ -70,6 +70,9 @@ const MODE_MAX_TURNS: Record<string, number> = {
 };
 const SCRATCH = [".asf/handoffs/**", ".asf/reviews/**", ".asf/screens/**"];
 
+/** Pause reason when Claude Code reports that it is not logged in (shown in the header and on Needs you). */
+const LOGGED_OUT = "Claude Code is not logged in";
+
 export interface NeedsYouItem {
   kind: "question" | "approval" | "blocked" | "paused" | "alert" | "team-paused";
   id: string;
@@ -93,6 +96,10 @@ interface ActiveRun {
   usage: UsageTotals;
   result?: Extract<StreamEvent, { kind: "result" }>;
   limited?: { resetsAt?: number };
+  /** Claude Code reported that it is not logged in. */
+  authFailed?: boolean;
+  /** The resume this run consumed, given back to the task if the run never really started (login failure). */
+  resumed: { session: string; prompt: string } | null;
   sawInit: boolean;
   cwd: string;
   liveOutput?: number;
@@ -505,6 +512,7 @@ export class Orchestrator {
       stage: o.stage,
       sessionId,
       usage: emptyUsage(),
+      resumed: o.resumeSession ? { session: o.resumeSession, prompt: o.prompt } : null,
       sawInit: false,
       cwd: o.cwd,
     };
@@ -632,10 +640,14 @@ export class Orchestrator {
       case "rate_limit":
         if (ev.status === "rejected") run.limited = { resetsAt: ev.resetsAt };
         break;
+      case "auth_error":
+        run.authFailed = true;
+        break;
       case "result":
         run.result = ev;
         run.usage = ev.usage;
         if (ev.usageLimit) run.limited = ev.usageLimit;
+        if (ev.authFailed) run.authFailed = true;
         break;
     }
   }
@@ -662,11 +674,13 @@ export class Orchestrator {
       ? "killed"
       : exit.timedOut
         ? "timeout"
-        : run.limited
-          ? "limited"
-          : r && !r.isError && exit.code === 0
-            ? "success"
-            : "error";
+        : run.authFailed
+          ? "auth_failed"
+          : run.limited
+            ? "limited"
+            : r && !r.isError && exit.code === 0
+              ? "success"
+              : "error";
     this.svc.updateRun(run.runId, {
       ended_at: new Date().toISOString(),
       exit_code: exit.code,
@@ -685,7 +699,7 @@ export class Orchestrator {
         current_run: null,
         current_task: null,
         status: "idle",
-        last_action: `Finished (${status})`,
+        last_action: status === "auth_failed" ? `Stopped: ${LOGGED_OUT}` : `Finished (${status})`,
       });
     const meta = { actor: run.agent, role: run.role, task: run.task, run: run.runId };
     this.svc.emit(
@@ -701,6 +715,10 @@ export class Orchestrator {
       meta,
     );
     if (status === "killed") return;
+    if (status === "auth_failed") {
+      this.onLoggedOut(run);
+      return;
+    }
     if (status === "limited") {
       const until = run.limited?.resetsAt ?? Date.now() + 60 * 60_000;
       this.svc.patchState({ limitedUntil: until });
@@ -732,6 +750,24 @@ export class Orchestrator {
     } catch (e) {
       this.svc.alert(`Post-run handling failed for ${t.id}: ${(e as Error).message}`, t.id);
     }
+  }
+
+  /** Claude Code has no usable login, so every run would fail the same way within a second. Pause the team and tell
+   * the owner how to log in, instead of counting the run against its task (three such runs would block the task
+   * with nothing but "run failed"). The task is left exactly as it was, so Resume picks it up again. */
+  private onLoggedOut(run: ActiveRun): void {
+    if (run.task) {
+      if (run.resumed) this.svc.patchMeta(run.task, { resume: run.resumed });
+      else if (this.svc.task(run.task)?.session_id === run.sessionId) this.svc.updateTask(run.task, { session_id: null });
+    }
+    const st = this.svc.state;
+    // Several runs can fail at once: pause and alert only once.
+    if (st.paused && st.pauseReason === LOGGED_OUT) return;
+    this.svc.patchState({ paused: true, pauseReason: LOGGED_OUT });
+    this.svc.emit("project.paused", `Scheduler paused: ${LOGGED_OUT}`, { reason: "auth" }, { actor: run.agent, role: run.role, task: run.task, run: run.runId });
+    this.svc.alert(
+      `Claude Code is not logged in, so no agent can work. Run \`claude\` in a terminal, type /login and sign in, then click Resume. Claude Code said: "${run.result?.text || "authentication failed"}"`,
+    );
   }
 
   private failRun(t: TaskRow, run: ActiveRun, why: string, resumePrompt: string | null): void {

@@ -421,6 +421,8 @@ Not yet. The runner is behind an interface so other CLIs can be added later.
 | Backend tasks fail with "uv: command not found" | Install [uv](https://docs.astral.sh/uv/) and restart `asf up` |
 | Agents can't start databases | Start Docker Desktop (or the Docker daemon) and check `docker compose version` |
 | AI Software Factory paused itself | Check the header. The cause is a Claude Code usage limit (it resumes on its own), the optional daily cap in Settings, or the kill switch (run `asf resume`) |
+| Paused: "Claude Code is not logged in" | Run `claude` in a terminal, type `/login` and sign in, then click **Resume** (or run `asf resume`). `asf doctor --login` confirms the login works |
+| A task is blocked with only "run failed" | Open the task's run on **Agents**, or read `.asf/runs/<run>/stream.jsonl` in your project folder. The last lines say why Claude Code stopped |
 | `asf: command not found` | Open a new terminal after `asf setup`, or run `node <repo>/packages/cli/bin/asf.js <command>` |
 | `pnpm: command not found` | Use `corepack pnpm …`, or run `corepack enable` once |
 

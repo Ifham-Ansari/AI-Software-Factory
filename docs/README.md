@@ -39,6 +39,7 @@ Architecture decision records, oldest first. Each one states the context, the de
 | [0010](decisions/0010-direct-workspace.md) | Direct workspace mode is the default |
 | [0011](decisions/0011-process-tracks.md) | Process tracks sized by triage |
 | [0012](decisions/0012-rename-to-ai-software-factory.md) | Rename to AI Software Factory (`asf`) |
+| [0013](decisions/0013-logged-out-claude-pauses.md) | A logged-out Claude Code pauses the team instead of failing tasks |
 
 ## Project history
 
