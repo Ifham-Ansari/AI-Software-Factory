@@ -54,7 +54,7 @@ export class KeyStore {
 
   /** Read on every call (cached by mtime), so `asf keys add` takes effect while the server runs. */
   list(): StoredKey[] {
-    let mtime = 0;
+    let mtime: number;
     try {
       mtime = fs.statSync(this.file).mtimeMs;
     } catch {
