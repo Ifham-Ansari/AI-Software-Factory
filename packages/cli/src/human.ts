@@ -359,6 +359,10 @@ export async function run(group: string, p: Parsed): Promise<number> {
       return control("kill");
     case "logs":
       return logs(p);
+    case "keys": {
+      const { keysCommand } = await import("./keys.ts");
+      return keysCommand(p);
+    }
     default:
       throw new CliError(`unknown command "${group}". Run \`asf help\`.`, 2);
   }

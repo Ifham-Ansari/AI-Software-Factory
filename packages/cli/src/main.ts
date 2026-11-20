@@ -14,6 +14,8 @@ Owner commands:
   asf pause | resume             stop/start scheduling new agent runs
   asf stop                       kill switch: stop every agent process now
   asf logs <agent|task> [-f]     recent events for an agent (backend-1) or task (T012)
+  asf keys [list|add|test|remove|providers]
+                                 the team's API keys for the built-in engine (free tiers, local models)
 
 Agent commands (used by agents inside runs; see .asf/skills/team-protocol/references/asf-cli.md):
   whoami, task show|list|start|block|unblock|done, progress, msg, ask, inbox, reply,

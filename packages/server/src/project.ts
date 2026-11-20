@@ -8,7 +8,9 @@ import { ensureWorktree, git, INTEGRATION_BRANCH } from "./git.ts";
 import { isLegacyIsolated, moveToDirect } from "./migrate.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { CLI_ENTRY, NODE_FLAGS, ProjectPaths, ROLES_SOURCE, SKILLS_SOURCE } from "./paths.ts";
-import { ClaudeRunner, type AgentRunner } from "./runner.ts";
+import { EngineRunner } from "./engine/runner.ts";
+import { sharedKeyStore, type KeyStore } from "./engine/keys.ts";
+import { ClaudeRunner, RunnerRouter, type AgentRunner } from "./runner.ts";
 import { ProjectService } from "./service.ts";
 import type { TokenStore } from "./tokens.ts";
 
@@ -22,6 +24,8 @@ export interface ProjectContext {
   tokens: TokenStore;
   serverUrl: () => string;
   runner?: AgentRunner;
+  /** The team's API keys for the built-in engine (default: ~/.asf/keys.json). */
+  keys?: KeyStore;
 }
 
 export class Project {
@@ -47,7 +51,12 @@ export class Project {
     this.svc.ensureProject(this.paths.name, this.paths.root, this.paths.config);
     const rolesFile = fs.existsSync(path.join(this.paths.asf, "roles.yaml")) ? path.join(this.paths.asf, "roles.yaml") : ROLES_SOURCE;
     this.roles = parseRolesYaml(fs.readFileSync(rolesFile, "utf8"));
-    this.runner = ctx.runner ?? new ClaudeRunner();
+    if (ctx.runner) this.runner = ctx.runner;
+    else {
+      const claude = new ClaudeRunner();
+      const engine = new EngineRunner({ keys: ctx.keys ?? sharedKeyStore(), settings: () => this.svc.settings });
+      this.runner = new RunnerRouter(() => (this.svc.settings.engine === "builtin" ? engine : claude), [claude, engine]);
+    }
     this.tokens = ctx.tokens;
     this.upgradeSettings();
     this.orch = new Orchestrator(this);
