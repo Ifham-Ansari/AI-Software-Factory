@@ -5,9 +5,11 @@ import {
   docOwners,
   isRole,
   matchesAny,
+  normalizeBatch,
   planStats,
   SEVERITIES,
   type Action,
+  type Batch,
   type DoneStatus,
   type Identity,
   type Role,
@@ -310,12 +312,13 @@ export class Commands {
     const taskId = this.runTask(id);
     const t = taskId ? this.svc.task(taskId) : null;
     if (batch) {
-      const qs = (batch as any)?.questions;
-      if (!Array.isArray(qs) || qs.length === 0) throw new ServiceError("batch file must be JSON with a non-empty \"questions\" array (see product-manager references/discovery.md)", 2);
-      for (const q of qs) {
-        if (!q.id || !q.question) throw new ServiceError("every batch question needs \"id\" and \"question\"", 2);
-      }
-      const intro = String((batch as any).intro ?? `${qs.length} questions`);
+      // Models write batches in several shapes; store the one shape the dashboard reads.
+      const raw = batch;
+      batch = normalizeBatch(raw);
+      const qs = (batch as Batch).questions;
+      if (qs.length === 0) throw new ServiceError("batch file must be JSON with a non-empty \"questions\" array, each with \"id\" and \"question\" (see product-manager references/discovery.md)", 2);
+      if (Array.isArray((raw as any)?.questions) && (raw as any).questions.length !== qs.length) throw new ServiceError("every batch question needs a \"question\" text", 2);
+      const intro = String((batch as Batch).intro ?? `${qs.length} questions`);
       const r = this.blockWithQuestion(id, t, to, intro, "batch", batch);
       // Design-direction gate off: take the designer's recommendation without waiting.
       if (t?.kind === "planning" && t.mode === "direction" && !this.p.orch.gateEnabled("design_direction")) {

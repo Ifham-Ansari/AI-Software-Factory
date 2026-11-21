@@ -18,7 +18,20 @@ export function readSkill(skillsDir: string, name: string): string | null {
   return fs.existsSync(f) ? stripFrontmatter(fs.readFileSync(f, "utf8")) : null;
 }
 
+/** The skill's one-line `description:` from its frontmatter. */
+export function skillDescription(skillsDir: string, name: string): string {
+  const f = path.join(skillsDir, name, "SKILL.md");
+  if (!fs.existsSync(f)) return "";
+  const fm = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/.exec(fs.readFileSync(f, "utf8"))?.[1] ?? "";
+  return (/^description:\s*(.+)$/m.exec(fm)?.[1] ?? "").trim();
+}
+
 export interface SystemPromptInput {
+  /**
+   * List the skills by path instead of including them, for models whose per-request limit is smaller than the
+   * skills (free tiers). The agent reads the files it needs.
+   */
+  lean?: boolean;
   roleTitle: string;
   project: string;
   skills: string[];
@@ -55,6 +68,17 @@ export function buildSystemPrompt(i: SystemPromptInput): string {
     "",
     ...(i.direct ? [DIRECT_NOTE] : []),
   ].join("\n");
+  if (i.lean) {
+    const dir = i.skillsDir.replace(/\\/g, "/");
+    const list = i.skills.map((s) => `- \`${dir}/${s}/SKILL.md\`: ${skillDescription(i.skillsDir, s) || s}`).join("\n");
+    return (
+      header +
+      "\n## Your skills (read them from these files)\n\n" +
+      "To keep each request small, your skills are not included here. **Before anything else, Read the first file** " +
+      "(how the team works and how to use the asf CLI). Read the others when your task needs them.\n\n" +
+      `${list}\n`
+    );
+  }
   const bodies = i.skills
     .map((s) => {
       const body = readSkill(i.skillsDir, s);

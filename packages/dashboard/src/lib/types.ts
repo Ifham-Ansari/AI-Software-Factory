@@ -135,6 +135,47 @@ export interface Settings {
   max_verify_failures: number;
   port_base: number;
   scheduler_interval_ms: number;
+  /** claude-code: agents are `claude` processes; builtin: AI Software Factory runs them on the team's API keys. */
+  engine?: "claude-code" | "builtin";
+  /** Built-in engine: models to try in order, as provider:model. */
+  engine_models?: { strong: string[]; fast: string[] };
+  engine_context_tokens?: number;
+  engine_max_turns?: number;
+}
+
+export interface ProviderPreset {
+  id: string;
+  label: string;
+  baseUrl: string;
+  keyUrl?: string;
+  keyless?: boolean;
+  note: string;
+}
+
+export interface KeyView {
+  id: string;
+  provider: string;
+  /** Whose key it is. */
+  label: string;
+  masked: string;
+  baseUrl: string;
+  addedAt: string;
+  invalid: string | null;
+  cooldownUntil: number | null;
+  usageToday: { requests: number; input: number; output: number };
+}
+
+export interface EngineInfo {
+  providers: ProviderPreset[];
+  keys: KeyView[];
+  claudeFound: boolean;
+}
+
+export interface ProviderModels {
+  provider: string;
+  label: string;
+  models: string[];
+  error?: string;
 }
 
 export interface Alert {
@@ -443,8 +484,10 @@ export interface PlanInfo {
     peakByRole: Record<string, number>;
   } | null;
   estimate: {
-    byRole: Record<string, { tasks: number; perRun: number; tokens: number }>;
+    byRole: Record<string, { tasks: number; perRun: number; tokens: number; requests?: number }>;
     totalTokens: number;
+    /** API requests (turns): what free tiers limit per day. */
+    totalRequests?: number;
   };
   team: Record<string, number>;
 }

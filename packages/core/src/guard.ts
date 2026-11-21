@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { matchesAny } from "./globs.ts";
 import type { Role } from "./types.ts";
@@ -85,7 +86,24 @@ function isCredentialPath(abs: string, home: string): boolean {
   const n = norm(abs);
   const h = norm(home);
   if (inside(n, `${h}/.claude`) || n === `${h}/.claude.json`) return true;
+  // The built-in engine's API keys (~/.asf/keys.json) and their usage log.
+  if (/\/\.asf\/(keys|key-usage)\.json$/.test(n)) return true;
   return /\/\.credentials\.json$/.test(n) || /\/\.anthropic(\/|$)/.test(n) || /\/\.aws\/credentials$/.test(n);
+}
+
+/** Resolve symlinks of a path that may not exist yet: realpath of the deepest existing ancestor, plus the rest. */
+export function realpathDeep(p: string): string {
+  let probe = path.resolve(p);
+  const tail: string[] = [];
+  while (!fs.existsSync(probe) && probe !== path.dirname(probe)) {
+    tail.unshift(path.basename(probe));
+    probe = path.dirname(probe);
+  }
+  try {
+    return path.join(fs.realpathSync(probe), ...tail);
+  } catch {
+    return path.resolve(p);
+  }
 }
 
 export function guardDecision(call: ToolCall, ctx: GuardContext): GuardResult {
@@ -223,8 +241,9 @@ function checkBash(command: string, ctx: GuardContext, cwd: string): GuardResult
   if (credPatterns.some((r) => r.test(command)) || command.replace(/\\/g, "/").toLowerCase().includes(`${home.toLowerCase()}/.claude`)) {
     return deny("reading Claude credentials or config (~/.claude) is never allowed");
   }
+  if (/\.asf[\\/]+(keys|key-usage)\.json/i.test(command)) return deny("the team's API keys (~/.asf/keys.json) are never readable by agents");
   if (/asf\.db\b/.test(command)) return deny("never touch .asf/asf.db; the asf CLI is the only writer of board state");
-  if (/guard\.json|\.asf[\\/]runs\b|ASF_GUARD_FILE|disableAllHooks/.test(command)) return deny("the run's guard and hook configuration are off limits");
+  if (/guard\.json|\.asf[\\/]runs\b|\.asf[\\/]sessions\b|ASF_GUARD_FILE|disableAllHooks/.test(command)) return deny("the run's guard and hook configuration are off limits");
 
   for (const words of splitCommands(command)) {
     const { env, argv } = stripPrefix(words);

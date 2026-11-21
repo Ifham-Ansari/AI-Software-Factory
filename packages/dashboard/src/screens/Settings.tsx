@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Badge, ErrorBox, Loadable, Modal, PageHeader, RoleChip, Skeleton, toast } from "../components/ui";
 import { api, pp } from "../lib/api";
 import { fmtTokens } from "../lib/format";
-import { useAction, useProject, useSkillFile, useSkills } from "../lib/queries";
+import { useAction, useEngine, useEngineModels, useProject, useSkillFile, useSkills } from "../lib/queries";
+import { href } from "../lib/router";
 import { GATES, PERMISSION_MODES, ROLES, type ProjectInfo, type Settings } from "../lib/types";
 
 const GATE_LABELS: Record<string, string> = {
@@ -29,7 +30,7 @@ export function SettingsScreen({ pid }: { pid: string }) {
   const project = useProject(pid);
   return (
     <div className="max-w-5xl">
-      <PageHeader title="Settings" kicker="scheduler · budget · gates · models · safety · skills" />
+      <PageHeader title="Settings" kicker="engine · scheduler · budget · gates · models · safety · skills" />
       <Loadable q={project} rows={10}>
         {(p) => <SettingsForm key={p.id} pid={pid} p={p} />}
       </Loadable>
@@ -94,7 +95,9 @@ function SettingsForm({ pid, p }: { pid: string; p: ProjectInfo }) {
       }}
       data-testid="settings-form"
     >
-      <h2 className="section-title mb-1">SCHEDULER & BUDGET</h2>
+      <EngineSection pid={pid} draft={draft} set={set} />
+
+      <h2 className="section-title mt-8 mb-1">SCHEDULER & BUDGET</h2>
       <Row label="Agents running at once" hint="Upper bound across all roles." htmlFor="s-max">
         <input
           id="s-max"
@@ -211,7 +214,7 @@ function SettingsForm({ pid, p }: { pid: string; p: ProjectInfo }) {
       <h2 className="section-title mt-8 mb-1">MODELS & TURNS PER ROLE</h2>
       <Row
         label="Per role"
-        hint="Model alias or full id; blank uses Claude Code's default. Max turns blank uses the default below."
+        hint="Claude Code: a model alias or full id. Built-in engine: provider:model, tried before the lists above. Blank uses the default."
       >
         <div className="grid grid-cols-[110px_minmax(0,1fr)_100px] items-center gap-x-3 gap-y-1.5">
           <span className="mono text-[10.5px] text-ink-3">role</span>
@@ -404,6 +407,187 @@ function SettingsForm({ pid, p }: { pid: string; p: ProjectInfo }) {
         </button>
       </div>
     </form>
+  );
+}
+
+const EMPTY_CHAINS = { strong: [] as string[], fast: [] as string[] };
+
+/** Which engine runs the agents, and (for the built-in one) which models, in the order they are tried. */
+function EngineSection({
+  pid,
+  draft,
+  set,
+}: {
+  pid: string;
+  draft: Settings;
+  set: <K extends keyof Settings>(k: K, v: Settings[K]) => void;
+}) {
+  const builtin = draft.engine === "builtin";
+  const engine = useEngine();
+  const models = useEngineModels(builtin);
+  const chains = draft.engine_models ?? EMPTY_CHAINS;
+  const usable = (engine.data?.keys ?? []).filter((k) => !k.invalid).length;
+  const options = (models.data ?? []).flatMap((g) => g.models.map((m) => `${g.provider}:${m}`));
+  const setChain = (tier: "strong" | "fast", list: string[]) => set("engine_models", { ...chains, [tier]: list });
+  return (
+    <>
+      <h2 className="section-title mb-1">AGENT ENGINE · what runs the agents</h2>
+      <Row label="Engine" hint="Switching applies to the next agent run; nothing is restarted.">
+        <div role="radiogroup" aria-label="Engine" className="grid grid-cols-2 gap-2 max-[1100px]:grid-cols-1" data-testid="engine-choice">
+          {(
+            [
+              ["claude-code", "Claude Code", "Your Claude subscription or Anthropic API key. The most capable option."],
+              ["builtin", "Built-in engine", "Your team's own API keys: free tiers (Gemini, Groq, OpenRouter, …) or a model on this computer. No subscription needed."],
+            ] as const
+          ).map(([id, title, text]) => {
+            const on = (draft.engine ?? "claude-code") === id;
+            return (
+              <label
+                key={id}
+                className={`flex cursor-pointer gap-2.5 rounded-xl border px-3.5 py-3 transition-colors ${on ? "border-accent bg-accent-soft" : "border-rule bg-surface hover:border-rule-strong"}`}
+              >
+                <input type="radio" name="engine" className="mt-1 accent-(--accent)" checked={on} onChange={() => set("engine", id)} />
+                <span>
+                  <span className="block text-[13.5px] font-semibold">{title}</span>
+                  <span className="block text-[12.5px] text-ink-2">{text}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {!builtin && engine.data && !engine.data.claudeFound && (
+          <div className="mt-2 text-[12.5px] text-warn" data-testid="claude-missing">
+            Claude Code is not installed on this computer, so agents cannot start. Choose the built-in engine, or install Claude Code.
+          </div>
+        )}
+      </Row>
+      {builtin && (
+        <>
+          <Row label="API keys" hint="Shared by every project on this computer.">
+            <div className="flex flex-wrap items-center gap-3 text-[13px]">
+              <span data-testid="engine-key-count">
+                {usable === 0 ? "No working key yet: agents cannot start." : `${usable} working ${usable === 1 ? "key" : "keys"}.`}
+              </span>
+              <a className="btn btn-sm" href={href(pid, "keys")}>
+                {usable === 0 ? "Add a key" : "Manage keys"}
+              </a>
+            </div>
+          </Row>
+          <Row
+            label="Main models"
+            hint="For planning and building. Tried in order: when one runs out of free quota, the next takes over."
+          >
+            <ModelChain testId="chain-strong" list={chains.strong} options={options} onChange={(l) => setChain("strong", l)} />
+          </Row>
+          <Row label="Quick models" hint="For sizing requests, answers, reviews, and checks. Empty: the main models.">
+            <ModelChain testId="chain-fast" list={chains.fast} options={options} onChange={(l) => setChain("fast", l)} />
+          </Row>
+          {models.data?.some((g) => g.error) && (
+            <div className="mt-2 text-[12px] text-warn">
+              {models.data
+                .filter((g) => g.error)
+                .map((g) => `${g.label}: could not list models (${g.error})`)
+                .join(" · ")}
+            </div>
+          )}
+          <Row
+            label="Size of each request"
+            hint="Instructions plus recent steps; older steps are trimmed to stay under this. Lower it if a provider's per-minute token limit is small."
+            htmlFor="s-ctx"
+          >
+            <input
+              id="s-ctx"
+              type="number"
+              min={8000}
+              step={1000}
+              className="field mono w-32"
+              value={draft.engine_context_tokens ?? 32000}
+              onChange={(e) => set("engine_context_tokens", Number(e.target.value) || 32000)}
+            />
+            <span className="ml-2 text-[12px] text-ink-3">tokens</span>
+          </Row>
+          <Row
+            label="Turns per run"
+            hint="Each turn is one request. Free tiers limit requests per day, so a confused agent stops here (a role's own lower limit still applies)."
+            htmlFor="s-eturns"
+          >
+            <input
+              id="s-eturns"
+              type="number"
+              min={5}
+              className="field mono w-32"
+              value={draft.engine_max_turns ?? 50}
+              onChange={(e) => set("engine_max_turns", Number(e.target.value) || 50)}
+            />
+          </Row>
+        </>
+      )}
+    </>
+  );
+}
+
+/** An ordered list of `provider:model`, picked from the providers' live model lists (or typed). */
+function ModelChain({ list, options, onChange, testId }: { list: string[]; options: string[]; onChange: (l: string[]) => void; testId: string }) {
+  const [next, setNext] = useState("");
+  const listId = `${testId}-options`;
+  const move = (i: number, d: -1 | 1) => {
+    const l = [...list];
+    [l[i], l[i + d]] = [l[i + d]!, l[i]!];
+    onChange(l);
+  };
+  const add = () => {
+    const v = next.trim();
+    if (!v || list.includes(v)) return;
+    if (!v.includes(":")) {
+      toast("Write it as provider:model, for example groq:llama-3.3-70b-versatile", "danger");
+      return;
+    }
+    onChange([...list, v]);
+    setNext("");
+  };
+  return (
+    <div className="flex flex-col gap-1.5" data-testid={testId}>
+      {list.length === 0 && <div className="text-[12.5px] text-ink-3">None yet.</div>}
+      {list.map((m, i) => (
+        <div key={m} className="flex items-center gap-2">
+          <span className="mono w-5 text-right text-[11px] text-ink-3">{i + 1}</span>
+          <span className="mono min-w-0 flex-1 truncate rounded-md border border-rule bg-surface px-2 py-1 text-[12px]">{m}</span>
+          <button type="button" className="btn btn-sm" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${m} up`}>
+            ↑
+          </button>
+          <button type="button" className="btn btn-sm" disabled={i === list.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${m} down`}>
+            ↓
+          </button>
+          <button type="button" className="btn btn-sm" onClick={() => onChange(list.filter((x) => x !== m))} aria-label={`Remove ${m}`}>
+            ✕
+          </button>
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <input
+          className="field mono flex-1 py-1 text-[12px]"
+          list={listId}
+          placeholder={options.length ? "pick or type provider:model" : "provider:model (add a key to see the models)"}
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          aria-label="Add a model"
+        />
+        <button type="button" className="btn btn-sm" onClick={add}>
+          Add
+        </button>
+      </div>
+      <datalist id={listId}>
+        {options.map((o) => (
+          <option key={o} value={o} />
+        ))}
+      </datalist>
+    </div>
   );
 }
 

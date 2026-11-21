@@ -1,23 +1,8 @@
-import { guardDecision, type GuardContext } from "@asf/core/guard";
+import { guardDecision, realpathDeep, type GuardContext } from "@asf/core/guard";
 import fs from "node:fs";
-import path from "node:path";
 
 // `asf hook pre-tool-use`: the PreToolUse guard. Claude Code pipes the hook JSON on stdin; exit 2 blocks the
 // tool call and stderr becomes the reason the agent sees. Must stay fast: no server round trip on the allow path.
-
-function realpathDeep(p: string): string {
-  let probe = path.resolve(p);
-  const tail: string[] = [];
-  while (!fs.existsSync(probe) && probe !== path.dirname(probe)) {
-    tail.unshift(path.basename(probe));
-    probe = path.dirname(probe);
-  }
-  try {
-    return path.join(fs.realpathSync(probe), ...tail);
-  } catch {
-    return path.resolve(p);
-  }
-}
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];

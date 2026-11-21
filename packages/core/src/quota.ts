@@ -37,19 +37,36 @@ export const DEFAULT_RUN_TOKENS: Record<string, number> = {
   security: 150_000,
 };
 
+/** Default turns per run by role. With the built-in engine every turn is one API request, and free tiers limit requests per day. */
+export const DEFAULT_RUN_TURNS: Record<string, number> = {
+  pm: 15,
+  "tech-lead": 30,
+  designer: 25,
+  backend: 30,
+  frontend: 30,
+  qa: 20,
+  reviewer: 12,
+  devops: 20,
+  security: 20,
+};
+
 export interface Estimate {
-  byRole: Record<string, { tasks: number; perRun: number; tokens: number }>;
+  byRole: Record<string, { tasks: number; perRun: number; tokens: number; requests: number }>;
   totalTokens: number;
+  /** API requests (turns), the limit that matters most on free tiers. */
+  totalRequests: number;
 }
 
 /** Estimate = task count by role x average run cost by role (history first, defaults otherwise), plus review and QA runs per task. */
-export function estimateBuild(tasksByRole: Record<string, number>, avgByRole: Record<string, number>, qaPerTask = true): Estimate {
+export function estimateBuild(tasksByRole: Record<string, number>, avgByRole: Record<string, number>, qaPerTask = true, avgTurnsByRole: Record<string, number> = {}): Estimate {
   const per = (r: string) => avgByRole[r] ?? DEFAULT_RUN_TOKENS[r] ?? 150_000;
+  const turns = (r: string) => avgTurnsByRole[r] ?? DEFAULT_RUN_TURNS[r] ?? 20;
   const byRole: Estimate["byRole"] = {};
   const add = (role: string, tasks: number) => {
-    const cur = byRole[role] ?? { tasks: 0, perRun: per(role), tokens: 0 };
+    const cur = byRole[role] ?? { tasks: 0, perRun: per(role), tokens: 0, requests: 0 };
     cur.tasks += tasks;
     cur.tokens = cur.tasks * cur.perRun;
+    cur.requests = Math.round(cur.tasks * turns(role));
     byRole[role] = cur;
   };
   let n = 0;
@@ -60,5 +77,6 @@ export function estimateBuild(tasksByRole: Record<string, number>, avgByRole: Re
   add("reviewer", n);
   if (qaPerTask) add("qa", n);
   const totalTokens = Object.values(byRole).reduce((a, b) => a + b.tokens, 0);
-  return { byRole, totalTokens };
+  const totalRequests = Object.values(byRole).reduce((a, b) => a + b.requests, 0);
+  return { byRole, totalTokens, totalRequests };
 }

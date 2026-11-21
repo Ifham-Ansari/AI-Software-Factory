@@ -8,12 +8,14 @@ const HELP = `asf — AI Software Factory: your local AI software team (runs on 
 Owner commands:
   asf setup [--uninstall]        install the asf command so it works from any folder
   asf init [path]                make a folder an AI Software Factory project (adds one hidden .asf folder)
-  asf doctor [--login]           check prerequisites (node, pnpm, git, docker, uv, claude)
+  asf doctor [--login] [--keys]  check prerequisites (node, pnpm, git, docker, uv, claude, API keys)
   asf up [--port N] [--no-open]  start the local server + dashboard (127.0.0.1 only)
   asf status                     phase, tasks, agents, quota for the current project
   asf pause | resume             stop/start scheduling new agent runs
   asf stop                       kill switch: stop every agent process now
   asf logs <agent|task> [-f]     recent events for an agent (backend-1) or task (T012)
+  asf keys [list|add|test|remove|providers]
+                                 the team's API keys for the built-in engine (free tiers, local models)
 
 Agent commands (used by agents inside runs; see .asf/skills/team-protocol/references/asf-cli.md):
   whoami, task show|list|start|block|unblock|done, progress, msg, ask, inbox, reply,

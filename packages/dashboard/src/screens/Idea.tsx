@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Markdown } from "../components/Markdown";
 import { ErrorBox, Icon, Loadable, PageHeader, toast } from "../components/ui";
-import { useAction, useProject } from "../lib/queries";
+import { useAction, useEngine, useProject } from "../lib/queries";
 import { href } from "../lib/router";
 
 const STAKES = [
@@ -27,13 +27,46 @@ function toBase64(file: File): Promise<string> {
   });
 }
 
+/** Before the first request: say so if no agent could start (no Claude Code, or no working API key). */
+function EngineReadiness({ pid, builtin }: { pid: string; builtin: boolean }) {
+  const engine = useEngine();
+  const e = engine.data;
+  if (!e) return null;
+  const usable = e.keys.filter((k) => !k.invalid).length;
+  let text: string | null = null;
+  let link: { to: string; label: string } | null = null;
+  if (builtin && usable === 0) {
+    text = "This project uses the built-in engine, but there is no working API key yet, so no agent can start.";
+    link = { to: href(pid, "keys"), label: "Add a free API key" };
+  } else if (!builtin && !e.claudeFound) {
+    text = "Claude Code is not installed on this computer, so no agent can start. No Claude subscription? The built-in engine runs on free API keys.";
+    link = { to: href(pid, "settings"), label: "Use the built-in engine" };
+  }
+  if (!text || !link) return null;
+  return (
+    <div
+      role="status"
+      className="mb-5 flex max-w-3xl flex-wrap items-center justify-between gap-3 rounded-xl border border-l-4 border-[color-mix(in_srgb,var(--warn)_40%,transparent)] border-l-warn bg-warn-soft px-4 py-3 text-[13px] text-ink"
+      data-testid="engine-readiness"
+    >
+      <span>{text}</span>
+      <a className="btn btn-sm" href={link.to}>
+        {link.label}
+      </a>
+    </div>
+  );
+}
+
 export function IdeaScreen({ pid }: { pid: string }) {
   const project = useProject(pid);
   return (
     <Loadable q={project}>
       {(p) =>
         p.phase === "idea" || p.phase === "done" ? (
-          <IdeaForm pid={pid} existing={Boolean(p.settings.existing) || p.phase === "done"} next={p.phase === "done"} />
+          <>
+            <EngineReadiness pid={pid} builtin={p.settings.engine === "builtin"} />
+            <IdeaForm pid={pid} existing={Boolean(p.settings.existing) || p.phase === "done"} next={p.phase === "done"} />
+          </>
         ) : (
           <div className="max-w-3xl">
             <PageHeader title="The current request" kicker="submitted · read only" />

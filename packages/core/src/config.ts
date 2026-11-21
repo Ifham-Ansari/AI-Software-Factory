@@ -68,7 +68,23 @@ export type WorkspaceMode = (typeof WORKSPACE_MODES)[number];
 export const PERMISSION_MODES = ["dontAsk", "acceptEdits", "default", "plan", "auto", "bypassPermissions"] as const;
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
+export const ENGINES = ["claude-code", "builtin"] as const;
+export type EngineName = (typeof ENGINES)[number];
+
 export const settingsSchema = z.object({
+  /**
+   * claude-code: every agent is a `claude -p` process (needs a Claude subscription or API key).
+   * builtin: AI Software Factory runs the agents itself on the team's own API keys (free tiers or local models).
+   */
+  engine: z.enum(ENGINES).default("claude-code"),
+  /** Built-in engine: models to try in order, as `provider:model` (e.g. `groq:llama-3.3-70b-versatile`). */
+  engine_models: z
+    .object({ strong: z.array(z.string()).default([]), fast: z.array(z.string()).default([]) })
+    .default({ strong: [], fast: [] }),
+  /** Built-in engine: each request (system prompt included) is trimmed to about this many tokens. */
+  engine_context_tokens: z.number().int().min(8000).default(32_000),
+  /** Built-in engine: turns per run. Free tiers count requests per day, so a confused run stops early. */
+  engine_max_turns: z.number().int().min(5).default(50),
   /**
    * direct: agents edit the project folder itself (like Claude Code); AI Software Factory commits each finished task.
    * isolated: each task gets its own git worktree and branch, merged into asf/integration.

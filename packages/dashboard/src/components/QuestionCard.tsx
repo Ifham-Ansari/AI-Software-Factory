@@ -3,7 +3,7 @@ import { useAction } from "../lib/queries";
 import { fmtAgo } from "../lib/format";
 import type { BatchOption, BatchQuestion, Question } from "../lib/types";
 import { Markdown } from "./Markdown";
-import { AgentName, Badge, ErrorBox, toast } from "./ui";
+import { AgentName, Badge, ErrorBox, Icon, toast } from "./ui";
 
 const HEX = /#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
 
@@ -101,7 +101,8 @@ function BatchItem({
           return (
             <label
               key={o.key}
-              className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 has-focus-visible:outline-2 has-focus-visible:outline-(--focus) ${checked ? "border-accent bg-accent-soft" : rec ? "border-[color-mix(in_srgb,var(--ok)_55%,transparent)] bg-ok-soft/40" : "border-rule hover:border-rule-strong"}`}
+              data-selected={checked || undefined}
+              className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 transition-[background-color,border-color,box-shadow] duration-150 has-focus-visible:outline-2 has-focus-visible:outline-(--focus) ${checked ? "border-accent bg-accent-soft shadow-[0_0_0_1px_var(--accent)]" : "border-rule hover:border-rule-strong hover:bg-sunken/60"}`}
             >
               <input
                 type="radio"
@@ -109,13 +110,19 @@ function BatchItem({
                 value={o.key}
                 checked={checked}
                 onChange={() => onChange(o.key)}
-                className="mt-0.75 accent-ink"
+                className="mt-0.75 accent-(--accent)"
               />
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-2">
-                  <span className="mono text-[12px] font-semibold">{o.key}</span>
-                  <span className="text-[13.5px]">{o.label}</span>
+                  <span className={`mono text-[12px] font-semibold ${checked ? "text-accent" : ""}`}>{o.key}</span>
+                  <span className={`text-[13.5px] ${checked ? "font-semibold text-ink" : ""}`}>{o.label}</span>
                   {rec && <Badge tone="ok">recommended</Badge>}
+                  {checked && (
+                    <span className="ml-auto inline-flex items-center gap-1 text-[11.5px] font-semibold text-accent">
+                      <Icon name="check" size={13} />
+                      your choice
+                    </span>
+                  )}
                 </span>
                 {rich && <OptionExtras o={o} />}
                 {optionExtra?.(o.key)}

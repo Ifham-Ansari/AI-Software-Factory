@@ -48,15 +48,16 @@ echo   [ok] Package manager: %PNPM%
 rem ---- 3. Claude Code and Git: needed by the agents, not to open the dashboard --
 where claude >nul 2>nul
 if errorlevel 1 (
-  echo   [!]  Claude Code was not found. The dashboard still opens, but agents cannot
-  echo        work until you install it and log in once by running: claude
-  echo        https://docs.claude.com/en/docs/claude-code
+  echo   [i]  Claude Code was not found. That is fine without a Claude subscription:
+  echo        add a free API key on the dashboard's "API keys" screen and choose
+  echo        "Built-in engine" in Settings. To use Claude Code instead, install it
+  echo        and log in once by running: claude  https://docs.claude.com/en/docs/claude-code
 ) else (
   echo   [ok] Claude Code found
 )
 where git >nul 2>nul
 if errorlevel 1 (
-  echo   [!]  Git was not found. Claude Code needs Git for Windows:
+  echo   [!]  Git was not found. Agents need the bash that comes with Git for Windows:
   echo        https://git-scm.com/download/win
 ) else (
   echo   [ok] Git found

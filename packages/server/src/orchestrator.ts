@@ -73,6 +73,18 @@ const SCRATCH = [".asf/handoffs/**", ".asf/reviews/**", ".asf/screens/**"];
 /** Pause reason when Claude Code reports that it is not logged in (shown in the header and on Needs you). */
 const LOGGED_OUT = "Claude Code is not logged in";
 
+/**
+ * Why a run failed, in words the owner can act on: the status plus what the runner said (for example a provider's
+ * "request too large" or "model does not support tools"), instead of only "run failed".
+ */
+function failedWhy(run: { result?: { isError: boolean; text: string } }, status = "failed"): string {
+  const said = run.result?.isError ? run.result.text.replace(/\s+/g, " ").trim() : "";
+  return said ? `run ${status}: ${said.length > 300 ? `${said.slice(0, 299)}…` : said}` : `run ${status}`;
+}
+
+/** API keys of the built-in engine's providers: agents' shells never see them, even if the owner exported one. */
+const PROVIDER_KEY_VARS = /^(GROQ|GEMINI|GOOGLE|OPENROUTER|MISTRAL|CEREBRAS|OPENAI|TOGETHER|DEEPSEEK|FIREWORKS)_API_KEY$/i;
+
 export interface NeedsYouItem {
   kind: "question" | "approval" | "blocked" | "paused" | "alert" | "team-paused";
   id: string;
@@ -286,7 +298,7 @@ export class Orchestrator {
     const a = this.svc.agent(agent)!;
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env))
-      if (v !== undefined && !k.startsWith("ASF_")) env[k] = v;
+      if (v !== undefined && !k.startsWith("ASF_") && !PROVIDER_KEY_VARS.test(k)) env[k] = v;
     // Agents get the asf CLI on PATH through per-project shims.
     const pathKey = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
     env[pathKey] = `${this.p.paths.bin}${path.delimiter}${env[pathKey] ?? ""}`;
@@ -419,10 +431,11 @@ export class Orchestrator {
     const sessionId = o.resumeSession ?? crypto.randomUUID();
     const skills = this.p.roles.roles[o.role]?.skills ?? ["team-protocol"];
     const systemFile = path.join(dir, "system.md");
-    fs.writeFileSync(
-      systemFile,
-      buildSystemPrompt({ roleTitle: roleTitle(this.p.roles, o.role), project: this.p.paths.name, skills, skillsDir: this.p.skillsDir(), direct: this.p.direct }),
-    );
+    const sys = { roleTitle: roleTitle(this.p.roles, o.role), project: this.p.paths.name, skills, skillsDir: this.p.skillsDir(), direct: this.p.direct };
+    fs.writeFileSync(systemFile, buildSystemPrompt(sys));
+    // The built-in engine sends this instead when a model's per-request limit is smaller than the skills.
+    const leanSystemFile = path.join(dir, "system-lean.md");
+    fs.writeFileSync(leanSystemFile, buildSystemPrompt({ ...sys, lean: true }));
     fs.writeFileSync(path.join(dir, "prompt.md"), o.prompt);
     const a = this.svc.agent(o.agent)!;
     const guardFile = path.join(dir, "guard.json");
@@ -544,6 +557,7 @@ export class Orchestrator {
         resume: Boolean(o.resumeSession),
         prompt: o.prompt,
         systemFile,
+        leanSystemFile,
         settingsFile,
         streamFile: path.join(dir, "stream.jsonl"),
         maxTurns,
@@ -552,6 +566,8 @@ export class Orchestrator {
         allowedTools: settings.allowed_tools,
         disallowedTools: settings.disallowed_tools,
         timeoutMs: settings.run_timeout_minutes * 60_000,
+        tier: MODE_MODEL[o.mode] ? "fast" : "strong",
+        sessionsDir: path.join(this.p.paths.asf, "sessions"),
       },
       {
         onEvent: (ev) => this.onStream(run, ev),
@@ -699,7 +715,7 @@ export class Orchestrator {
         current_run: null,
         current_task: null,
         status: "idle",
-        last_action: status === "auth_failed" ? `Stopped: ${LOGGED_OUT}` : `Finished (${status})`,
+        last_action: status === "auth_failed" ? `Stopped: ${this.authHelp().reason}` : `Finished (${status})`,
       });
     const meta = { actor: run.agent, role: run.role, task: run.task, run: run.runId };
     this.svc.emit(
@@ -761,12 +777,21 @@ export class Orchestrator {
       else if (this.svc.task(run.task)?.session_id === run.sessionId) this.svc.updateTask(run.task, { session_id: null });
     }
     const st = this.svc.state;
+    const help = this.authHelp();
     // Several runs can fail at once: pause and alert only once.
-    if (st.paused && st.pauseReason === LOGGED_OUT) return;
-    this.svc.patchState({ paused: true, pauseReason: LOGGED_OUT });
-    this.svc.emit("project.paused", `Scheduler paused: ${LOGGED_OUT}`, { reason: "auth" }, { actor: run.agent, role: run.role, task: run.task, run: run.runId });
-    this.svc.alert(
-      `Claude Code is not logged in, so no agent can work. Run \`claude\` in a terminal, type /login and sign in, then click Resume. Claude Code said: "${run.result?.text || "authentication failed"}"`,
+    if (st.paused && st.pauseReason === help.reason) return;
+    this.svc.patchState({ paused: true, pauseReason: help.reason });
+    this.svc.emit("project.paused", `Scheduler paused: ${help.reason}`, { reason: "auth" }, { actor: run.agent, role: run.role, task: run.task, run: run.runId });
+    this.svc.alert(`${help.alert} Details: "${run.result?.text || "authentication failed"}"`);
+  }
+
+  /** The runner's own words for a login failure (Claude Code login, or the built-in engine's API keys). */
+  private authHelp(): { reason: string; alert: string } {
+    return (
+      this.p.runner.authHelp?.() ?? {
+        reason: LOGGED_OUT,
+        alert: "Claude Code is not logged in, so no agent can work. Run `claude` in a terminal, type /login and sign in, then click Resume.",
+      }
     );
   }
 
@@ -804,7 +829,7 @@ export class Orchestrator {
       this.failRun(
         t,
         run,
-        ok ? "run ended without `asf task done` or `asf task block`" : `run ${status}`,
+        ok ? "run ended without `asf task done` or `asf task block`" : failedWhy(run, status),
         "Your previous run ended before the task was finished: `asf task done` was not called, or it was refused. Check `asf task show $ASF_TASK` and `git status`, finish the work, and hand off with `asf task done`.",
       );
     } else if (run.stage === "review") {
@@ -918,7 +943,7 @@ export class Orchestrator {
     this.failRun(
       t,
       run,
-      ok ? `run ended without the expected output (${expected[t.mode ?? ""] ?? "?"})` : "run failed",
+      ok ? `run ended without the expected output (${expected[t.mode ?? ""] ?? "?"})` : failedWhy(run),
       `Your run ended before you finished. You still need to ${expected[t.mode ?? ""] ?? "finish your mode"}.`,
     );
   }
@@ -1465,7 +1490,7 @@ export class Orchestrator {
         return;
       }
     }
-    this.failRun(t, run, ok ? "run ended without `asf reply`" : "run failed", `You have not replied to ${open.join(", ")} yet. Reply with \`asf reply <id> "..."\`.`);
+    this.failRun(t, run, ok ? "run ended without `asf reply`" : failedWhy(run), `You have not replied to ${open.join(", ")} yet. Reply with \`asf reply <id> "..."\`.`);
   }
 
   // ------------------------------------------------------------------------------------- merging
@@ -1839,6 +1864,7 @@ export class Orchestrator {
 
   resume(): void {
     this.svc.patchState({ paused: false, pauseReason: null, limitedUntil: null });
+    this.p.runner.reset?.();
     for (const t of this.svc.tasks())
       if (t.hold === "killed" || t.hold === "error") this.svc.updateTask(t.id, { hold: null });
     this.svc.emit("project.resumed", "Scheduler resumed", {}, { actor: "human" });

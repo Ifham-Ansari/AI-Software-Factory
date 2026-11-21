@@ -24,6 +24,12 @@ export interface RunSpec {
   allowedTools: string[];
   disallowedTools: string[];
   timeoutMs: number;
+  /** Built-in engine: which model chain from Settings (routine modes use the fast one). */
+  tier?: "strong" | "fast";
+  /** Built-in engine: where conversations are kept for resuming (`.asf/sessions`). */
+  sessionsDir?: string;
+  /** Built-in engine: the system prompt with the skills listed by path, for models with a small per-request limit. */
+  leanSystemFile?: string;
 }
 
 export interface RunExit {
@@ -44,6 +50,44 @@ export interface AgentRunner {
   kill(runId: string): Promise<void>;
   killAll(): Promise<void>;
   active(): string[];
+  /** What to tell the owner when runs fail because the runner cannot authenticate (default: the Claude Code login). */
+  authHelp?(): { reason: string; alert: string } | undefined;
+  /** The owner resumed the team: forget remembered failures (rejected keys, cooldowns) and try again. */
+  reset?(): void;
+}
+
+/** Starts each run on the runner the project's Settings choose, so switching engines needs no restart. */
+export class RunnerRouter implements AgentRunner {
+  private readonly pick: () => AgentRunner;
+  private readonly all: AgentRunner[];
+  constructor(pick: () => AgentRunner, all: AgentRunner[]) {
+    this.pick = pick;
+    this.all = all;
+  }
+
+  start(spec: RunSpec, handlers: RunHandlers): { pid: number | undefined } {
+    return this.pick().start(spec, handlers);
+  }
+
+  async kill(runId: string): Promise<void> {
+    await Promise.all(this.all.map((r) => r.kill(runId)));
+  }
+
+  async killAll(): Promise<void> {
+    await Promise.all(this.all.map((r) => r.killAll()));
+  }
+
+  active(): string[] {
+    return this.all.flatMap((r) => r.active());
+  }
+
+  authHelp(): { reason: string; alert: string } | undefined {
+    return this.pick().authHelp?.();
+  }
+
+  reset(): void {
+    for (const r of this.all) r.reset?.();
+  }
 }
 
 export function claudeArgs(spec: RunSpec): string[] {
