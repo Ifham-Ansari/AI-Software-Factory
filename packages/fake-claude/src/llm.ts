@@ -93,6 +93,7 @@ export async function startFakeLlm(opts: { scenarioFile: string; stateDir: strin
   /** Which script each run got (array scenarios advance once per run, like fake-claude per process). */
   const scriptOfRun = new Map<string, Script>();
   const counters = new Map<string, number>();
+  const lastRequest = new Map<string, number>();
   fs.mkdirSync(opts.stateDir, { recursive: true });
 
   const pickScript = (h: Record<string, string>, prompt: string): Script => {
@@ -140,6 +141,21 @@ export async function startFakeLlm(opts: { scenarioFile: string; stateDir: strin
       } catch {
         return send(400, { error: { message: "bad json" } });
       }
+      // Real-provider behaviour the engine must cope with:
+      // "small…" keys allow 8000 tokens per request (like Groq's free tier for some models);
+      const requested = Math.ceil(raw.length / 4);
+      if (/^Bearer small/.test(auth) && requested > 8000)
+        return send(413, {
+          error: { message: `Request too large for model \`${body.model}\` on tokens per minute (TPM): Limit 8000, Requested ${requested}, please reduce your message size and try again.` },
+        });
+      // "minute…" keys allow one request per second (a per-minute limit, scaled down);
+      if (/^Bearer minute/.test(auth)) {
+        const last = lastRequest.get(auth) ?? 0;
+        if (Date.now() - last < 1000) return send(429, { error: { message: "Rate limit reached: requests per minute" } }, { "retry-after": "1" });
+        lastRequest.set(auth, Date.now());
+      }
+      // and models named "no-tools…" cannot call tools.
+      if (String(body.model).startsWith("no-tools")) return send(400, { error: { message: `${body.model} does not support tools` } });
       const messages: any[] = body.messages ?? [];
       // The engine's nudge is not a new prompt: the script carries on where it was.
       const lastUser = messages.map((m) => (m.role === "user" && m.content === ENGINE_NUDGE ? "nudge" : m.role)).lastIndexOf("user");

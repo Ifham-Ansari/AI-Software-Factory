@@ -28,6 +28,8 @@ export interface RunSpec {
   tier?: "strong" | "fast";
   /** Built-in engine: where conversations are kept for resuming (`.asf/sessions`). */
   sessionsDir?: string;
+  /** Built-in engine: the system prompt with the skills listed by path, for models with a small per-request limit. */
+  leanSystemFile?: string;
 }
 
 export interface RunExit {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { guardDecision } from "../guard.ts";
 import { compactMessages, estimateTokens, type ChatMessage } from "./compact.ts";
-import { classifyProviderError, parseDurationMs, rateLimitResetAt } from "./errors.ts";
+import { classifyProviderError, parseDurationMs, rateLimitResetAt, reportedTokenLimit } from "./errors.ts";
 import { pickKey, type PoolKey } from "./pool.ts";
 import { maskKey, parseModelRef } from "./providers.ts";
 import { engineCallId, normalizeToolCall } from "./tools.ts";
@@ -27,6 +27,15 @@ describe("provider errors", () => {
     // Gemini: retryDelay in the body.
     expect(rateLimitResetAt({}, '{"error":{"details":[{"retryDelay":"33s"}]}}', NOW)).toBe(NOW + 33_000);
     expect(rateLimitResetAt({}, "", NOW)).toBe(NOW + 60_000);
+  });
+
+  it("reads the token limit a provider reports for a request that is too large", () => {
+    const groq =
+      '{"error":{"message":"Request too large for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 13419, please reduce your message size and try again."}}';
+    expect(classifyProviderError(413, {}, groq)).toMatchObject({ kind: "context", limit: 8000 });
+    expect(reportedTokenLimit("This model's maximum context length is 8192 tokens.")).toBe(8192);
+    expect(reportedTokenLimit("exceeds the context window of 32768 tokens")).toBe(32768);
+    expect(reportedTokenLimit("prompt is too long")).toBeUndefined();
   });
 
   it("classifies failures", () => {

@@ -57,7 +57,7 @@ if errorlevel 1 (
 )
 where git >nul 2>nul
 if errorlevel 1 (
-  echo   [!]  Git was not found. Agents need Git for Windows (for its bash):
+  echo   [!]  Git was not found. Agents need the bash that comes with Git for Windows:
   echo        https://git-scm.com/download/win
 ) else (
   echo   [ok] Git found

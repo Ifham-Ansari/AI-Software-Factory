@@ -57,8 +57,12 @@ interface Call {
 }
 
 const MAX_NETWORK_RETRIES = 3;
-/** Never trim the conversation below this, however big the system prompt is. */
-const MIN_HISTORY_TOKENS = 4000;
+/** Room a request needs for the conversation itself, next to the instructions. */
+const MIN_HISTORY_TOKENS = 3000;
+/** Tokens the tool definitions add to every request. */
+const TOOLS_TOKENS = Math.ceil(JSON.stringify(ENGINE_TOOLS).length / 4);
+/** When every key is limited but the earliest reset is this close (a per-minute limit), the run waits for it. */
+const MAX_INLINE_WAIT_MS = 90_000;
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -101,17 +105,22 @@ function normalizeCalls(raw: ToolCallMsg[] | undefined, messageIndex: number): {
   return { calls, history };
 }
 
+/**
+ * The models a run tries, in order: a per-role model from Settings (when it names a provider; Claude aliases like
+ * "sonnet" do not), then its own list (quick or main), then the other list as a backup.
+ */
 export function engineChain(spec: Pick<RunSpec, "model" | "tier">, s: EngineSettings): string[] {
   const { strong, fast } = s.engine_models;
-  const tier = spec.tier === "fast" && fast.length ? fast : strong.length ? strong : fast;
-  // A per-role model in Settings wins when it names a provider ("groq:…"); Claude aliases like "sonnet" do not.
+  const [first, second] = spec.tier === "fast" ? [fast, strong] : [strong, fast];
   const own = spec.model && parseModelRef(spec.model) ? [spec.model] : [];
-  return [...new Set([...own, ...tier])];
+  return [...new Set([...own, ...first, ...second])];
 }
 
 export class EngineRunner implements AgentRunner {
   private runs = new Map<string, ActiveEngineRun>();
   private readonly opts: EngineRunnerOptions;
+  /** Request size limits providers reported, per model, so later runs start within them. */
+  private readonly learnedBudgets = new Map<string, number>();
 
   constructor(opts: EngineRunnerOptions) {
     this.opts = opts;
@@ -180,12 +189,19 @@ export class EngineRunner implements AgentRunner {
     const sessionId = spec.sessionId;
     const history: ChatMessage[] = (spec.resume ? loadSession(sessionsDir, sessionId) : null) ?? [];
     history.push({ role: "user", content: spec.prompt });
-    let system = ENGINE_PREAMBLE;
-    try {
-      system += `\n${fs.readFileSync(spec.systemFile, "utf8")}`;
-    } catch {
-      /* the orchestrator always writes it; keep going with the preamble */
-    }
+    const readSystem = (file: string | undefined) => {
+      try {
+        return file ? `${ENGINE_PREAMBLE}\n${fs.readFileSync(file, "utf8")}` : null;
+      } catch {
+        return null;
+      }
+    };
+    // The full instructions include the role's skills (about 10k tokens). Models with a smaller per-request limit
+    // (many free tiers) get the short version, which lists the skills by path for the agent to read.
+    const fullSystem = readSystem(spec.systemFile) ?? ENGINE_PREAMBLE;
+    const leanSystem = readSystem(spec.leanSystemFile) ?? fullSystem;
+    const fullTokens = estimateTokens([{ role: "system", content: fullSystem }]) + TOOLS_TOKENS;
+    const leanTokens = estimateTokens([{ role: "system", content: leanSystem }]) + TOOLS_TOKENS;
     const guard = this.readGuard(spec);
     const ctx = { cwd: spec.cwd, env: spec.env, signal: e.ac.signal, runId: spec.runId, children: e.children };
     // Tests only (a fake scenario is set): tell the scripted fake provider which run is asking.
@@ -200,9 +216,11 @@ export class EngineRunner implements AgentRunner {
     let isError = false;
     let subtype = "success";
     let resultText = "";
-    // The context budget covers the whole request, so the (large) system prompt counts against it.
-    const systemTokens = estimateTokens([{ role: "system", content: system }]);
-    let budget = settings.engine_context_tokens;
+    // Each model's request budget (the whole request: instructions, tools, and history). Starts at the setting and
+    // shrinks to what a provider says its limit is; remembered across runs.
+    const budgetOf = (ref: string) => Math.min(settings.engine_context_tokens, this.learnedBudgets.get(ref) ?? Number.POSITIVE_INFINITY);
+    /** Models that cannot take this run (too small, no tool calling, unknown model …), with the reason. */
+    const skipped = new Map<string, string>();
     let retries = 0;
     let usedTool = false;
     let nudged = false;
@@ -216,13 +234,34 @@ export class EngineRunner implements AgentRunner {
         resultText = `Reached the turn limit (${maxTurns}).`;
         break;
       }
-      const pick = pickKey(chain, this.opts.keys.list(), this.opts.keys.state);
+      const live = chain.filter((ref) => !skipped.has(ref));
+      if (chain.length && !live.length) {
+        isError = true;
+        subtype = "error_during_execution";
+        resultText = `None of the chosen models could take this run. ${[...skipped].map(([ref, why]) => `${ref}: ${why}`).join(" · ")}`.slice(0, 1500);
+        break;
+      }
+      const pick = pickKey(live, this.opts.keys.list(), this.opts.keys.state);
       if (!pick.ok) {
+        // A per-minute limit resets soon: wait inside the run instead of pausing the whole team.
+        if (pick.reason === "limited" && pick.resetsAt - Date.now() <= MAX_INLINE_WAIT_MS) {
+          const ms = Math.max(1000, pick.resetsAt - Date.now() + 500);
+          emit({ type: "system", subtype: "api_retry", error: `every key for these models is at its per-minute limit; waiting ${Math.ceil(ms / 1000)} s`, attempt: retries + 1 });
+          await sleep(ms, e.ac.signal);
+          continue;
+        }
         isError = true;
         subtype = "error_during_execution";
         // These texts are what the stream parser recognizes as a usage limit (with a reset time) or a login failure.
         resultText = pick.reason === "limited" ? `${pick.message}: usage limit reached|${Math.ceil(pick.resetsAt / 1000)}` : `Invalid API key · ${pick.message}`;
         break;
+      }
+      const budget = budgetOf(pick.ref);
+      const useFull = fullTokens + MIN_HISTORY_TOKENS <= budget;
+      const sysTokens = useFull ? fullTokens : leanTokens;
+      if (sysTokens + MIN_HISTORY_TOKENS > budget) {
+        skipped.set(pick.ref, `its limit (about ${budget} tokens per request) is too small even for the short instructions`);
+        continue;
       }
       const key = this.opts.keys.get(pick.key.id)!;
       this.opts.keys.touch(key.id);
@@ -230,7 +269,7 @@ export class EngineRunner implements AgentRunner {
         baseUrl: this.opts.keys.baseUrl(key),
         apiKey: key.key,
         model: pick.model,
-        messages: [{ role: "system", content: system }, ...compactMessages(history, Math.max(MIN_HISTORY_TOKENS, budget - systemTokens))],
+        messages: [{ role: "system", content: useFull ? fullSystem : leanSystem }, ...compactMessages(history, budget - sysTokens)],
         tools: ENGINE_TOOLS,
         signal: e.ac.signal,
         testHeaders,
@@ -241,8 +280,15 @@ export class EngineRunner implements AgentRunner {
         emit({ type: "system", subtype: "api_retry", error: `${pick.ref} (${key.label}'s key): ${err.message}`.slice(0, 300), attempt: retries + 1 });
         if (err.kind === "auth") this.opts.keys.setInvalid(key.id, err.message);
         else if (err.kind === "limited") this.opts.keys.cooldown(key.id, err.resetsAt ?? Date.now() + 60_000);
-        else if (err.kind === "context" && budget > 6000) budget = Math.floor(budget / 2);
-        else if (err.kind === "retry") {
+        else if (err.kind === "context") {
+          // Shrink to the limit the provider reported (or halve), and try again; give up on this model only when
+          // not even the short instructions fit.
+          let next = err.limit ? Math.floor(err.limit * 0.85) : Math.floor(budget / 2);
+          // Token counts are estimates: if the reported limit does not shrink the request, step down anyway.
+          if (next >= budget) next = Math.floor(budget * 0.8);
+          if (next >= leanTokens + MIN_HISTORY_TOKENS) this.learnedBudgets.set(pick.ref, next);
+          else skipped.set(pick.ref, err.message);
+        } else if (err.kind === "retry") {
           retries++;
           if (retries > MAX_NETWORK_RETRIES) {
             // This provider is down for now: let the other keys and models take over.
@@ -250,10 +296,8 @@ export class EngineRunner implements AgentRunner {
             retries = 0;
           } else await sleep(2000 * 2 ** (retries - 1), e.ac.signal);
         } else {
-          isError = true;
-          subtype = "error_during_execution";
-          resultText = `${pick.ref}: ${err.message}`;
-          break;
+          // This model cannot serve the run (no tool calling, unknown id, …): the next model in the list takes over.
+          skipped.set(pick.ref, err.message);
         }
         continue;
       }

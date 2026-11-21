@@ -73,6 +73,15 @@ const SCRATCH = [".asf/handoffs/**", ".asf/reviews/**", ".asf/screens/**"];
 /** Pause reason when Claude Code reports that it is not logged in (shown in the header and on Needs you). */
 const LOGGED_OUT = "Claude Code is not logged in";
 
+/**
+ * Why a run failed, in words the owner can act on: the status plus what the runner said (for example a provider's
+ * "request too large" or "model does not support tools"), instead of only "run failed".
+ */
+function failedWhy(run: { result?: { isError: boolean; text: string } }, status = "failed"): string {
+  const said = run.result?.isError ? run.result.text.replace(/\s+/g, " ").trim() : "";
+  return said ? `run ${status}: ${said.length > 300 ? `${said.slice(0, 299)}…` : said}` : `run ${status}`;
+}
+
 /** API keys of the built-in engine's providers: agents' shells never see them, even if the owner exported one. */
 const PROVIDER_KEY_VARS = /^(GROQ|GEMINI|GOOGLE|OPENROUTER|MISTRAL|CEREBRAS|OPENAI|TOGETHER|DEEPSEEK|FIREWORKS)_API_KEY$/i;
 
@@ -422,10 +431,11 @@ export class Orchestrator {
     const sessionId = o.resumeSession ?? crypto.randomUUID();
     const skills = this.p.roles.roles[o.role]?.skills ?? ["team-protocol"];
     const systemFile = path.join(dir, "system.md");
-    fs.writeFileSync(
-      systemFile,
-      buildSystemPrompt({ roleTitle: roleTitle(this.p.roles, o.role), project: this.p.paths.name, skills, skillsDir: this.p.skillsDir(), direct: this.p.direct }),
-    );
+    const sys = { roleTitle: roleTitle(this.p.roles, o.role), project: this.p.paths.name, skills, skillsDir: this.p.skillsDir(), direct: this.p.direct };
+    fs.writeFileSync(systemFile, buildSystemPrompt(sys));
+    // The built-in engine sends this instead when a model's per-request limit is smaller than the skills.
+    const leanSystemFile = path.join(dir, "system-lean.md");
+    fs.writeFileSync(leanSystemFile, buildSystemPrompt({ ...sys, lean: true }));
     fs.writeFileSync(path.join(dir, "prompt.md"), o.prompt);
     const a = this.svc.agent(o.agent)!;
     const guardFile = path.join(dir, "guard.json");
@@ -547,6 +557,7 @@ export class Orchestrator {
         resume: Boolean(o.resumeSession),
         prompt: o.prompt,
         systemFile,
+        leanSystemFile,
         settingsFile,
         streamFile: path.join(dir, "stream.jsonl"),
         maxTurns,
@@ -818,7 +829,7 @@ export class Orchestrator {
       this.failRun(
         t,
         run,
-        ok ? "run ended without `asf task done` or `asf task block`" : `run ${status}`,
+        ok ? "run ended without `asf task done` or `asf task block`" : failedWhy(run, status),
         "Your previous run ended before the task was finished: `asf task done` was not called, or it was refused. Check `asf task show $ASF_TASK` and `git status`, finish the work, and hand off with `asf task done`.",
       );
     } else if (run.stage === "review") {
@@ -932,7 +943,7 @@ export class Orchestrator {
     this.failRun(
       t,
       run,
-      ok ? `run ended without the expected output (${expected[t.mode ?? ""] ?? "?"})` : "run failed",
+      ok ? `run ended without the expected output (${expected[t.mode ?? ""] ?? "?"})` : failedWhy(run),
       `Your run ended before you finished. You still need to ${expected[t.mode ?? ""] ?? "finish your mode"}.`,
     );
   }
@@ -1479,7 +1490,7 @@ export class Orchestrator {
         return;
       }
     }
-    this.failRun(t, run, ok ? "run ended without `asf reply`" : "run failed", `You have not replied to ${open.join(", ")} yet. Reply with \`asf reply <id> "..."\`.`);
+    this.failRun(t, run, ok ? "run ended without `asf reply`" : failedWhy(run), `You have not replied to ${open.join(", ")} yet. Reply with \`asf reply <id> "..."\`.`);
   }
 
   // ------------------------------------------------------------------------------------- merging

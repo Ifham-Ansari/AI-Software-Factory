@@ -69,18 +69,22 @@ describe("built-in engine (fake llm)", () => {
     expect(events(h, "run.retry").some((e) => /Teammate 1's key/.test(e.summary))).toBe(true);
   });
 
-  it("when every key is rate limited, the team pauses until the reset and then resumes", async () => {
+  it("when every key is limited for longer than a minute, the team pauses until the reset and then resumes", async () => {
     h = await startHarness(
       {
         ...DEFAULT_BUILD_SCENARIO,
-        "backend:implement": [{ steps: [{ asf: ["task", "start", "${ASF_TASK}"] }, { usageLimit: { inSeconds: 2 } }] }, { steps: implementSteps() }],
+        "backend:implement": [{ steps: [{ asf: ["task", "start", "${ASF_TASK}"] }, { usageLimit: { inSeconds: 600 } }] }, { steps: implementSteps() }],
         "backend:implement:resume": { steps: [{ expectPrompt: "usage limit" }, ...implementSteps()] },
       },
       { runner: "engine", workspace: "direct" },
     );
     await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
     const limit = await waitFor(() => events(h!, "quota.limit")[0], "usage limit");
-    expect(limit.data.resetsAt as number).toBeGreaterThan(Date.now() - 1000);
+    expect(limit.data.resetsAt as number).toBeGreaterThan(Date.now() + 500_000);
+    expect(h.project.svc.state.limitedUntil).toBe(limit.data.resetsAt);
+    // Ten minutes pass: the limit resets for the team and for the key.
+    h.project.svc.patchState({ limitedUntil: Date.now() - 1 });
+    for (const s of Object.values(h.keys!.state)) s.cooldownUntil = 0;
     await waitFor(() => events(h!, "quota.resumed").length > 0, "auto resume", 20_000);
     await waitFor(done("T001"), "T001 done after the reset");
     const be = h.invocations().filter((i) => i.task === "T001" && i.role === "backend");
@@ -153,6 +157,43 @@ describe("built-in engine (fake llm)", () => {
     expect(stream).not.toMatch(/"name":"write_file"/);
     const session = JSON.parse(fs.readFileSync(path.join(h.project.paths.asf, "sessions", `${impl.session_id}.json`), "utf8"));
     expect(session.messages.filter((m: { content?: string }) => /replied without calling a tool/.test(m.content ?? ""))).toHaveLength(1);
+  });
+
+  it("a model with a small per-request limit gets the short instructions and still does the work", async () => {
+    h = await startHarness(DEFAULT_BUILD_SCENARIO, { runner: "engine", workspace: "direct", keys: ["small-key"] });
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
+    await waitFor(done("T001"), "T001 done");
+    const impl = h.project.svc.runs({ task: "T001" }).find((r) => r.stage === "implement")!;
+    // The first request (full skills) was refused with the provider's limit; later ones fit.
+    expect(events(h, "run.retry").some((e) => /Limit 8000/.test(e.summary))).toBe(true);
+    expect(impl.result_status).toBe("success");
+    expect(h.project.svc.task("T001")!.run_failures).toBe(0);
+    // The short instructions point the agent at its skill files instead of including them.
+    const lean = fs.readFileSync(path.join(h.project.paths.runs, impl.id, "system-lean.md"), "utf8");
+    expect(lean).toMatch(/team-protocol\/SKILL\.md/);
+    expect(lean.length).toBeLessThan(fs.readFileSync(path.join(h.project.paths.runs, impl.id, "system.md"), "utf8").length / 5);
+  });
+
+  it("a quick model that cannot call tools hands over to the main models", async () => {
+    h = await startHarness(DEFAULT_BUILD_SCENARIO, {
+      runner: "engine",
+      workspace: "direct",
+      settings: { engine: "builtin", engine_models: { strong: ["custom:fake-model"], fast: ["custom:no-tools-model"] } },
+    });
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
+    await waitFor(done("T001"), "T001 done");
+    // Review is a quick-model run: it fell back to the main model instead of failing.
+    expect(events(h, "run.retry").some((e) => /no-tools-model does not support tools/.test(e.summary))).toBe(true);
+    expect(h.project.svc.runs({ task: "T001" }).every((r) => r.result_status === "success" || !r.ended_at)).toBe(true);
+  });
+
+  it("a per-minute limit is waited out inside the run, without pausing the team", async () => {
+    h = await startHarness(DEFAULT_BUILD_SCENARIO, { runner: "engine", workspace: "direct", keys: ["minute-key"], settings: { qa_per_task: false } });
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
+    await waitFor(done("T001"), "T001 done", 120_000);
+    expect(events(h, "run.retry").some((e) => /waiting \d+ s/.test(e.summary))).toBe(true);
+    expect(events(h, "quota.limit")).toHaveLength(0);
+    expect(events(h, "project.paused")).toHaveLength(0);
   });
 
   it("the kill switch stops engine runs at once and the tasks keep their place", async () => {

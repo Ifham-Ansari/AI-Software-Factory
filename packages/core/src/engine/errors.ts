@@ -7,10 +7,25 @@ export interface ProviderError {
   kind: ProviderErrorKind;
   /** Epoch ms when a rate-limited key may be used again. */
   resetsAt?: number;
+  /** For a request that is too large: the token limit the provider reported, when it said one. */
+  limit?: number;
   message: string;
 }
 
 const DEFAULT_COOLDOWN_MS = 60_000;
+
+/**
+ * The token limit in a "request too large" error: Groq's "tokens per minute (TPM): Limit 8000, Requested 13419",
+ * OpenAI's "maximum context length is 8192 tokens", or "context window of 32768 tokens".
+ */
+export function reportedTokenLimit(text: string): number | undefined {
+  const m =
+    /\bLimit\s*:?\s*(\d{3,})\b/i.exec(text) ??
+    /maximum context length is\s*(\d{3,})/i.exec(text) ??
+    /context (?:length|window)(?: of| is)?\s*(\d{3,})/i.exec(text) ??
+    /max(?:imum)?[_ ]tokens?[^\d]{0,20}(\d{3,})/i.exec(text);
+  return m ? Number(m[1]) : undefined;
+}
 
 /** "2m59.56s", "1h2m", "30s", "750ms", "12" (seconds) → milliseconds. */
 export function parseDurationMs(s: string): number | undefined {
@@ -82,7 +97,7 @@ export function classifyProviderError(status: number, headers: Record<string, st
   const message = `HTTP ${status}: ${bodyMessage(body)}`;
   if (status === 401 || status === 403) return { kind: "auth", message };
   if (status === 429) return { kind: "limited", resetsAt: rateLimitResetAt(headers, body, now), message };
-  if (status === 413 || CONTEXT_RE.test(body)) return { kind: "context", message };
+  if (status === 413 || CONTEXT_RE.test(body)) return { kind: "context", limit: reportedTokenLimit(body), message };
   // Some providers answer a used-up free quota with 402 or 400 plus a quota message.
   if (status === 402 || (status === 400 && QUOTA_RE.test(body))) return { kind: "limited", resetsAt: rateLimitResetAt(headers, body, now), message };
   if (status === 408 || status >= 500 || status === 0) return { kind: "retry", message };

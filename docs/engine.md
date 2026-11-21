@@ -30,7 +30,9 @@ Pick models that **support tool calling** (also called function calling): agents
 * On cloud free tiers, choose the largest model with tool calling that the provider offers for free (for example a 70B-class Llama on Groq, a Flash model on Gemini, or a `:free` model marked "tools" on OpenRouter).
 * On your own computer, a coding model of about 30B parameters needs roughly 16 to 24 GB of GPU memory; smaller ones work for small changes.
 
-The lists are **ordered**. When the first model runs out of free quota, the next one takes over in the middle of the same conversation. Put your best model first and add a second provider as backup.
+The lists are **ordered**. When the first model runs out of free quota, or cannot take a run at all (no tool calling, or a limit smaller than one request), the next one takes over in the middle of the same conversation. A run uses its own list first and the other list as a backup, so quick runs fall back to your main models and the other way round. Put your best model first and add a second provider as backup.
+
+**Small per-request limits.** Some free tiers allow only a few thousand tokens per request or per minute (Groq's free tier allows 8,000 tokens per minute for some models). An agent's full instructions (its role's skills) are about 10,000 tokens. When a provider reports a smaller limit, AI Software Factory remembers it and sends that model **short instructions** instead: the same rules, with the skills listed by file path for the agent to read when it needs them. This works, but small-limit models do noticeably worse and run slowly (one request a minute at 8,000 tokens per minute). Prefer them as a backup, not as your first model.
 
 Model names are written `provider:model`, for example `groq:llama-3.3-70b-versatile`. For a custom or local server added with its own base URL, the provider part is the key's id (shown in the model picker).
 
@@ -40,7 +42,8 @@ One person runs AI Software Factory on their computer, and each teammate adds **
 
 * spreads requests over every working key;
 * moves a running agent to the next key when one hits its limit, without losing its work;
-* pauses the team when every key is limited, and carries on by itself after the earliest reset;
+* waits inside the run when every key is at a per-minute limit that resets within about a minute and a half;
+* pauses the team when every key is limited for longer (a daily limit), and carries on by itself after the earliest reset;
 * shows on **API keys** each key's status (ready, limited until a time, or rejected) and how much each teammate's keys were used today.
 
 Keys are stored only on that computer, in `~/.asf/keys.json`, shared by all its projects, and never shown in full again. Agents cannot read them.
@@ -69,7 +72,9 @@ Practical tips:
 | Paused: "No working API key" | Every key for the chosen models was rejected, or there is none | Fix or add a key on **API keys**, check the models in Settings, then click **Resume** (Resume tries every key again) |
 | Paused: usage limit, resumes at a time | Every key has hit its limit | Wait (it resumes by itself), or add another key or provider and click **Resume** |
 | A key shows "rejected" | The provider refused it (wrong, expired, or revoked) | Create a new key, add it, and remove the old one |
-| A run ends with "does not support tools" | The model cannot call tools | Choose a model with tool calling |
+| A run ends with "does not support tools" | The model cannot call tools, and no other model in your lists could take over | Choose a model with tool calling |
+| A run ends with "None of the chosen models could take this run" | Every model in both lists failed; the message names each one and why (for example "Request too large … Limit 8000") | Add a model with a bigger limit (another provider), or check the model names |
+| Agents are slow, with "waiting N s" in the feed | Every key is at a per-minute limit | Add a key from another provider, or lower **Agents running at once** |
 | Agents finish without doing the work | The model is too small for the task | Use a bigger model, or a smaller request |
 
 ## Privacy
