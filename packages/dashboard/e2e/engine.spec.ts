@@ -69,6 +69,15 @@ test("Questions: a batch an agent wrote in another shape shows its options and c
   await expect(page.getByTestId("batch-q-design-direction")).toContainText("Choose the visual direction.");
   await expect(page.getByText("Bloom: soft and modern.")).toBeVisible();
   await expect(page.getByText("The dual accents separate hair from nails.")).toBeVisible();
+  // Nothing looks chosen until the owner picks; then the pick is unmistakable.
+  const card = page.getByTestId("batch-q-design-direction");
+  await expect(card.getByText("your choice")).toHaveCount(0);
+  await page.getByText("Ledger: calm and precise.").click();
+  await expect(card.locator("label[data-selected]")).toHaveCount(1);
+  await expect(card.locator("label[data-selected]")).toContainText("Ledger: calm and precise.");
+  await expect(card.locator("label[data-selected]")).toContainText("your choice");
+  await page.getByText("Atelier: dark and moody.").click();
+  await expect(card.locator("label[data-selected]")).toContainText("Atelier: dark and moody.");
   await page.getByText("Ledger: calm and precise.").click();
   await page.getByRole("button", { name: "Submit answers" }).click();
   await expect.poll(() => h!.project.svc.question("Q-9001")?.status).toBe("answered");
