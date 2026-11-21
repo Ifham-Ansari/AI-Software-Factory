@@ -12,3 +12,4 @@ export * from "./db.ts";
 export * from "./ids.ts";
 export * from "./lessons.ts";
 export * from "./engine/index.ts";
+export * from "./batch.ts";

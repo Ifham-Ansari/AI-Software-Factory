@@ -48,6 +48,33 @@ test("API keys: teammates add their keys (shown masked), test them, and remove o
   expect(h.keys!.list().map((k) => k.label)).toEqual(["Ayesha"]);
 });
 
+test("Questions: a batch an agent wrote in another shape shows its options and can be answered", async ({ page }) => {
+  h = await startHarness(DEFAULT_BUILD_SCENARIO);
+  // As a free model wrote it: options as a map, and a recommendation sentence.
+  h.project.db.run(
+    "INSERT INTO questions (id, message_id, from_agent, to_addr, kind, body, batch) VALUES ('Q-9001', NULL, 'designer-1', '@human', 'batch', '1 questions', ?)",
+    JSON.stringify({
+      questions: [
+        {
+          id: "design-direction",
+          question: "Choose the visual direction.",
+          options: { A: "A — Ledger: calm and precise.", B: "B — Atelier: dark and moody.", C: "C — Bloom: soft and modern." },
+          recommendation: "C — Bloom. The dual accents separate hair from nails.",
+        },
+      ],
+    }),
+  );
+  await openDashboard(page, h, "questions");
+  await expect(page.getByTestId("screen-error")).toHaveCount(0);
+  await expect(page.getByTestId("batch-q-design-direction")).toContainText("Choose the visual direction.");
+  await expect(page.getByText("Bloom: soft and modern.")).toBeVisible();
+  await expect(page.getByText("The dual accents separate hair from nails.")).toBeVisible();
+  await page.getByText("Ledger: calm and precise.").click();
+  await page.getByRole("button", { name: "Submit answers" }).click();
+  await expect.poll(() => h!.project.svc.question("Q-9001")?.status).toBe("answered");
+  expect(String(h.project.svc.question("Q-9001")!.answer)).toContain("A: Ledger: calm and precise.");
+});
+
 test("Settings: switch to the built-in engine and pick models from the providers' live lists", async ({ page }) => {
   h = await startHarness(DEFAULT_BUILD_SCENARIO);
   llm = await startFakeLlm({ scenarioFile: process.env.ASF_FAKE_SCENARIO!, stateDir: h.stateDir });

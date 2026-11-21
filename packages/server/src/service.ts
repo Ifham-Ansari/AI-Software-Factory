@@ -5,6 +5,7 @@ import {
   defaultSettings,
   formatId,
   mergeSettings,
+  normalizeBatch,
   parseConfigYaml,
   type Db,
   type DocStatus,
@@ -69,6 +70,12 @@ function parseJ<T>(s: unknown, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+/** A stored question batch, in the one shape readers expect (older rows may hold an agent's own shape). */
+function readBatch(s: unknown) {
+  const raw = parseJ<unknown>(s, null);
+  return raw === null ? null : normalizeBatch(raw);
 }
 
 /**
@@ -638,12 +645,12 @@ export class ProjectService {
 
   question(id: string): Row | undefined {
     const q = this.db.get("SELECT * FROM questions WHERE id = ? OR message_id = ?", id, id);
-    return q ? { ...q, batch: parseJ(q.batch, null), answer: parseJ(q.answer, q.answer) } : undefined;
+    return q ? { ...q, batch: readBatch(q.batch), answer: parseJ(q.answer, q.answer) } : undefined;
   }
 
   questions(status?: string): Row[] {
     const rows = status ? this.db.all("SELECT * FROM questions WHERE status = ? ORDER BY created_at", status) : this.db.all("SELECT * FROM questions ORDER BY created_at");
-    return rows.map((q) => ({ ...q, batch: parseJ(q.batch, null), answer: parseJ(q.answer, q.answer) }));
+    return rows.map((q) => ({ ...q, batch: readBatch(q.batch), answer: parseJ(q.answer, q.answer) }));
   }
 
   markAnswered(id: string, answer: unknown, by: string): void {
