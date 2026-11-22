@@ -128,7 +128,12 @@ export async function startFakeLlm(opts: { scenarioFile: string; stateDir: strin
     // Test keys: "bad…" is rejected, "limited…" is always rate limited.
     if (/^Bearer bad/.test(auth)) return send(401, { error: { message: "Invalid API Key" } });
     if (/^Bearer limited/.test(auth)) return send(429, { error: { message: "Rate limit reached" } }, { "retry-after": "3600" });
-    if (req.method === "GET" && /\/models$/.test(req.url ?? "")) return send(200, { data: [{ id: "fake-model" }, { id: "fake-fast" }] });
+    // Like a real list: a capable model, a short-context one, a small one, and one that is not for chat (never
+    // picked). Light work is routed to the small one, other work to fake-model.
+    if (req.method === "GET" && /\/models$/.test(req.url ?? ""))
+      return send(200, {
+        data: [{ id: "fake-model", context_window: 128_000 }, { id: "fake-fast", context_window: 8_000 }, { id: "fake-mini-8b", context_window: 32_000 }, { id: "text-embedding-fake" }],
+      });
     if (req.method !== "POST" || !/\/chat\/completions$/.test(req.url ?? "")) return send(404, { error: { message: "not found" } });
     let raw = "";
     req.on("data", (c: Buffer) => {

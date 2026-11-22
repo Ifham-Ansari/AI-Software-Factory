@@ -6,6 +6,7 @@ export { ClaudeRunner, claudeArgs, killTree, resolveBin, RunnerRouter, type Agen
 export { EngineRunner, engineChain, type EngineSettings } from "./engine/runner.ts";
 export { KeyStore, sharedKeyStore, type KeyView, type StoredKey } from "./engine/keys.ts";
 export { listModels } from "./engine/client.ts";
+export { catalogFor, ModelCatalog, type ProviderModels } from "./engine/catalog.ts";
 export { asfHome, ASF_REPO, buildId, CLI_ENTRY, cliCommand, ProjectPaths } from "./paths.ts";
 export { runShell, findShell } from "./shell.ts";
 export { safeJoin } from "./safe-path.ts";

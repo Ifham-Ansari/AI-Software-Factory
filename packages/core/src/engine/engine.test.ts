@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { guardDecision } from "../guard.ts";
-import { compactMessages, estimateTokens, type ChatMessage } from "./compact.ts";
+import { compactMessages, estimateTokens, progressSummary, shrinkToolCall, type ChatMessage } from "./compact.ts";
 import { classifyProviderError, parseDurationMs, rateLimitResetAt, reportedTokenLimit } from "./errors.ts";
 import { pickKey, type PoolKey } from "./pool.ts";
 import { maskKey, parseModelRef } from "./providers.ts";
@@ -45,6 +45,20 @@ describe("provider errors", () => {
     expect(classifyProviderError(400, {}, '{"error":{"message":"You exceeded your current quota"}}').kind).toBe("limited");
     expect(classifyProviderError(503, {}, "overloaded").kind).toBe("retry");
     expect(classifyProviderError(400, {}, '{"error":{"message":"tools are not supported by this model"}}').kind).toBe("fatal");
+  });
+
+  it("rules out a model that is not free on this account instead of waiting for it", () => {
+    // OpenRouter: a paid model id (no :free) on an account without credits.
+    expect(classifyProviderError(402, {}, '{"error":{"message":"This request requires more credits, or fewer max_tokens.","code":402}}')).toMatchObject({
+      kind: "fatal",
+      message: expect.stringMatching(/not free on this account/),
+    });
+    // Z.ai: a paid GLM model answers 429 with "Insufficient balance", which no wait fixes.
+    expect(classifyProviderError(429, {}, '{"error":{"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}}', NOW).kind).toBe("fatal");
+    // A free model's daily cap is a real limit (it resets), even though it mentions credits.
+    const daily = '{"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429}}';
+    expect(classifyProviderError(429, {}, daily, NOW).kind).toBe("limited");
+    expect(classifyProviderError(429, {}, '{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details.","status":"RESOURCE_EXHAUSTED"}}', NOW).kind).toBe("limited");
   });
 });
 
@@ -105,13 +119,89 @@ describe("compaction", () => {
 
   it("drops the oldest steps whole when stubs are not enough, never splitting a call from its result", () => {
     const m: ChatMessage[] = [{ role: "user", content: "task" }, ...Array.from({ length: 10 }, (_, i) => step(i, 4000)).flat()];
-    const out = compactMessages(m, 2500, 6);
+    const out = compactMessages(m, 1200, 6);
     expect(estimateTokens(out)).toBeLessThan(estimateTokens(m));
     expect(out[0]).toMatchObject({ role: "user" });
     expect((out[0] as { content: string }).content).toMatch(/earlier steps were removed/);
     const callIds = out.flatMap((x) => (x.role === "assistant" ? (x.tool_calls ?? []).map((c) => c.id) : []));
     const resultIds = out.flatMap((x) => (x.role === "tool" ? [x.tool_call_id] : []));
     expect(resultIds).toEqual(callIds);
+  });
+
+  const call = (i: number, name: string, args: Record<string, unknown>, result: string): ChatMessage[] => [
+    { role: "assistant", content: null, tool_calls: [{ id: `k${i}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] },
+    { role: "tool", tool_call_id: `k${i}`, content: result },
+  ];
+  const argsOf = (m: ChatMessage[]) =>
+    m.flatMap((x) => (x.role === "assistant" ? (x.tool_calls ?? []).map((c) => JSON.parse(c.function.arguments) as Record<string, string>) : []));
+
+  it("shortens the content of files already written before dropping any step (a designer writing big mockups)", () => {
+    const m: ChatMessage[] = [
+      { role: "user", content: "Design the screens." },
+      ...call(1, "Write", { file_path: "screens/home.html", content: "<div>".repeat(6000) }, "Wrote screens/home.html."),
+      ...call(2, "Write", { file_path: "screens/book.html", content: "<div>".repeat(7200) }, "Wrote screens/book.html."),
+    ];
+    const out = compactMessages(m, 2000);
+    expect(estimateTokens(out)).toBeLessThanOrEqual(2000);
+    // Every step stays; the content is replaced by a pointer to the file on disk.
+    expect(out).toHaveLength(m.length);
+    expect((out[0] as { content: string }).content).toBe("Design the screens.");
+    const [home, book] = argsOf(out);
+    expect(home).toEqual({ file_path: "screens/home.html", content: "(30000 characters, already written to screens/home.html; Read the file to see them)" });
+    expect(book!.content).toMatch(/^\(36000 characters, already written to screens\/book\.html/);
+    // The stored conversation itself is not changed.
+    expect(argsOf(m)[0]!.content).toHaveLength(30_000);
+  });
+
+  it("when steps must be dropped, says what they did: files, asf commands, and the checklist", () => {
+    const m: ChatMessage[] = [
+      { role: "user", content: "task" },
+      ...call(1, "TodoWrite", { todos: [{ content: "Home page", status: "completed" }, { content: "Booking page", status: "pending" }] }, "Todos updated."),
+      ...call(2, "Write", { file_path: "screens/home.html", content: "<h1>Home</h1>" }, "Wrote screens/home.html."),
+      ...call(3, "Bash", { command: "cd app && asf doc submit design" }, "submitted"),
+      ...Array.from({ length: 8 }, (_, i) => step(10 + i, 4000)).flat(),
+    ];
+    const note = (compactMessages(m, 1200, 6)[0] as { content: string }).content;
+    expect(note).toMatch(/^task\n\n\(\d+ earlier steps were removed to save tokens\./);
+    expect(note).toContain("Files you already wrote or edited: screens/home.html.");
+    expect(note).toContain("asf commands you already ran: asf doc submit design.");
+    expect(note).toContain("- [x] Home page\n- [ ] Booking page");
+    expect(note).toContain("Do not redo finished work");
+  });
+});
+
+describe("progress summary and shortened calls", () => {
+  const assistant = (calls: [string, Record<string, unknown>][]): ChatMessage => ({
+    role: "assistant",
+    content: null,
+    tool_calls: calls.map(([name, args], i) => ({ id: `c${i}`, type: "function", function: { name, arguments: JSON.stringify(args) } })),
+  });
+
+  it("lists each file once, most recent last, and only board-changing asf commands", () => {
+    const s = progressSummary([
+      assistant([
+        ["Write", { file_path: "a.ts", content: "1" }],
+        ["Edit", { file_path: "b.ts", old_string: "x", new_string: "y" }],
+        ["Edit", { file_path: "a.ts", old_string: "1", new_string: "2" }],
+        ["Bash", { command: "asf whoami" }],
+        ["Bash", { command: "asf task done T001 --status DONE --handoff .asf/handoffs/T001.md" }],
+        ["Read", { file_path: "c.ts" }],
+      ]),
+    ]);
+    expect(s).toContain("Files you already wrote or edited: b.ts, a.ts.");
+    expect(s).toContain("asf commands you already ran: asf task done T001 --status DONE --handoff .asf/handoffs/T001.md.");
+    expect(s).not.toContain("whoami");
+    expect(progressSummary([assistant([["Read", { file_path: "c.ts" }]])])).toBeNull();
+    expect(progressSummary([{ role: "user", content: "hi" }])).toBeNull();
+  });
+
+  it("shortens only big arguments, and keeps the call valid JSON", () => {
+    const small = { id: "c1", type: "function" as const, function: { name: "Read", arguments: '{"file_path":"a"}' } };
+    expect(shrinkToolCall(small)).toBe(small);
+    const bash = shrinkToolCall({ id: "c2", type: "function", function: { name: "Bash", arguments: JSON.stringify({ command: `echo ${"y".repeat(2000)}` }) } });
+    expect(JSON.parse(bash.function.arguments).command).toMatch(/… \(1705 more characters trimmed\)$/);
+    const broken = shrinkToolCall({ id: "c3", type: "function", function: { name: "Write", arguments: `{"file_path": "a", "content": "${"z".repeat(900)}` } });
+    expect(JSON.parse(broken.function.arguments)).toEqual({ note: "(arguments trimmed to save tokens)" });
   });
 });
 

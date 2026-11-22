@@ -60,6 +60,9 @@ describe("built-in engine (fake llm)", () => {
 
   it("a rate-limited key hands over to a teammate's key without pausing", async () => {
     h = await startHarness(DEFAULT_BUILD_SCENARIO, { runner: "engine", workspace: "direct", keys: ["limited-key", "good-key"] });
+    // The first teammate's model is chosen in Settings, so it is tried first.
+    const first = `${h.keys!.list()[0]!.id}:fake-model`;
+    h.project.svc.updateSettings({ engine_models: { strong: [first], fast: [first] } });
     await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
     await waitFor(done("T001"), "T001 done");
     expect(h.project.svc.state.paused).toBe(false);
@@ -159,6 +162,23 @@ describe("built-in engine (fake llm)", () => {
     expect(session.messages.filter((m: { content?: string }) => /replied without calling a tool/.test(m.content ?? ""))).toHaveLength(1);
   });
 
+  it("a call that keeps failing the same way gets told to change course", async () => {
+    h = await startHarness(
+      {
+        ...DEFAULT_BUILD_SCENARIO,
+        "backend:implement": {
+          steps: [{ asf: ["task", "start", "${ASF_TASK}"] }, ...Array.from({ length: 3 }, () => ({ bash: "cat notes/missing.txt", allowFail: true })), ...implementSteps().slice(2)],
+        },
+      },
+      { runner: "engine", workspace: "direct" },
+    );
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
+    await waitFor(done("T001"), "T001 done");
+    const impl = h.project.svc.runs({ task: "T001" }).find((r) => r.stage === "implement")!;
+    // The first two failures come back as they are; the third also says that repeating it will not help.
+    expect(streamOf(impl.id).match(/this exact call has now failed \d times with the same result/g)).toEqual(["this exact call has now failed 3 times with the same result"]);
+  });
+
   it("a model with a small per-request limit gets the short instructions and still does the work", async () => {
     h = await startHarness(DEFAULT_BUILD_SCENARIO, { runner: "engine", workspace: "direct", keys: ["small-key"] });
     await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
@@ -194,6 +214,111 @@ describe("built-in engine (fake llm)", () => {
     expect(events(h, "run.retry").some((e) => /waiting \d+ s/.test(e.summary))).toBe(true);
     expect(events(h, "quota.limit")).toHaveLength(0);
     expect(events(h, "project.paused")).toHaveLength(0);
+  });
+
+  it("with no models chosen, models are picked by task: a small task on a small model, a large one on the strongest", async () => {
+    h = await startHarness(DEFAULT_BUILD_SCENARIO, { runner: "engine", workspace: "direct", settings: { engine: "builtin", engine_models: { strong: [], fast: [] } } });
+    await seedBuild(h, {
+      "T001.md": taskFile("T001", { role: "backend", size: "S" }),
+      "T002.md": taskFile("T002", { role: "backend", size: "L" }),
+    });
+    await waitFor(() => done("T001")() && done("T002")(), "both tasks done");
+    const impl = (id: string) => h!.project.svc.runs({ task: id }).find((r) => r.stage === "implement")!;
+    // The small task goes to the small model, the large one to the most capable (the embedding model never).
+    expect(streamOf(impl("T001").id)).toMatch(/"model":"k_[0-9a-f]+:fake-mini-8b"/);
+    expect(streamOf(impl("T002").id)).toMatch(/"model":"k_[0-9a-f]+:fake-model"/);
+    const levels = events(h, "run.started").filter((e) => e.data.stage === "implement").map((e) => `${e.task}:${e.data.level}`);
+    expect(levels.sort()).toEqual(["T001:light", "T002:heavy"]);
+  });
+
+  it("a small task that failed moves up to a stronger model", async () => {
+    h = await startHarness(
+      {
+        ...DEFAULT_BUILD_SCENARIO,
+        // The first run ends without finishing the task; the second finishes it.
+        "backend:implement": [{ steps: [{ asf: ["task", "start", "${ASF_TASK}"] }] }, { steps: implementSteps() }],
+        "backend:implement:resume": { steps: implementSteps().slice(2) },
+      },
+      { runner: "engine", workspace: "direct", settings: { engine: "builtin", engine_models: { strong: [], fast: [] } } },
+    );
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend", size: "S" }) });
+    await waitFor(done("T001"), "T001 done");
+    const impl = h.project.svc.runs({ task: "T001" }).filter((r) => r.stage === "implement");
+    expect(impl).toHaveLength(2);
+    expect(streamOf(impl[0]!.id)).toMatch(/:fake-mini-8b"/);
+    expect(streamOf(impl[1]!.id)).toMatch(/:fake-model"/);
+  });
+
+  it("when the chosen model's key runs out, another key's best model takes over", async () => {
+    h = await startHarness(DEFAULT_BUILD_SCENARIO, { runner: "engine", workspace: "direct", keys: ["limited-key", "good-key"] });
+    const [limited] = h.keys!.list();
+    // Only the first teammate's server is chosen; the second key is used through its automatic pick.
+    h.project.svc.updateSettings({ engine_models: { strong: [`${limited!.id}:fake-model`], fast: [] } });
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
+    await waitFor(done("T001"), "T001 done");
+    expect(h.project.svc.state.paused).toBe(false);
+    const good = h.keys!.list()[1]!;
+    expect(h.keys!.usageToday()[good.id]?.requests).toBeGreaterThan(0);
+    // Turned off, the same setup has nothing to fall back to.
+    expect(events(h, "quota.limit")).toHaveLength(0);
+  });
+
+  it("a small-limit model keeps working after writing big files (their content is not sent again)", async () => {
+    const big = "<section>".repeat(4500); // 40,500 characters, like a designer's HTML mockup
+    h = await startHarness(
+      {
+        ...DEFAULT_BUILD_SCENARIO,
+        "backend:implement": {
+          steps: [{ asf: ["task", "start", "${ASF_TASK}"] }, { write: "src/home.html", content: big }, { write: "src/book.html", content: big }, ...implementSteps().slice(2)],
+        },
+      },
+      { runner: "engine", workspace: "direct", keys: ["small-key"] },
+    );
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend", owns: ["src/**"] }) });
+    await waitFor(done("T001"), "T001 done");
+    expect(fs.readFileSync(path.join(h.root, "src/book.html"), "utf8")).toHaveLength(big.length);
+    const impl = h.project.svc.runs({ task: "T001" }).find((r) => r.stage === "implement")!;
+    expect(impl.result_status).toBe("success");
+    expect(h.project.svc.task("T001")!.run_failures).toBe(0);
+  });
+
+  it("after a long limit, adding a key retries at once, and the resumed run is told what it already did", async () => {
+    h = await startHarness(
+      {
+        ...DEFAULT_BUILD_SCENARIO,
+        "backend:implement": [
+          { steps: [{ asf: ["task", "start", "${ASF_TASK}"] }, { write: "src/${ASF_TASK}.txt", content: "work of ${ASF_TASK}\n" }, { usageLimit: { inSeconds: 600 } }] },
+          { steps: implementSteps() },
+        ],
+        // The resumed run fails unless its prompt carries the progress summary.
+        "backend:implement:resume": { steps: [{ expectPrompt: "Files you already wrote or edited: src/T001.txt" }, ...implementSteps().slice(3)] },
+      },
+      { runner: "engine", workspace: "direct" },
+    );
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
+    await waitFor(() => events(h!, "quota.limit")[0], "usage limit");
+    // The wait is on Needs you, with a way to try now.
+    const needs = await h.api("GET", "/needs-you");
+    expect(needs.find((x: { id: string }) => x.id === "limited")).toMatchObject({ action: "resume", title: expect.stringMatching(/waiting for usage limits to reset/) });
+    // A teammate adds a key: the team tries again at once instead of waiting ten minutes.
+    const res = await fetch(`${h.server.url}/api/keys`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${h.server.tokens.master}`, "content-type": "application/json" },
+      body: JSON.stringify({ provider: "custom", label: "Teammate 2", key: "fresh-key", baseUrl: h.fakeLlm!.url }),
+    });
+    expect(res.status).toBe(200);
+    await waitFor(() => events(h!, "quota.resumed").some((e) => /key was added/.test(e.summary)), "retry after the key was added");
+    await waitFor(done("T001"), "T001 done");
+    const impl = h.project.svc.runs({ task: "T001" }).filter((r) => r.stage === "implement");
+    expect(impl.map((r) => r.mode)).toEqual(["fresh", "resume"]);
+  });
+
+  it("after a restart, a project waiting for a usage limit tries the keys again", async () => {
+    h = await startHarness(DEFAULT_BUILD_SCENARIO, { runner: "engine", workspace: "direct" });
+    h.project.svc.patchState({ limitedUntil: Date.now() + 3_600_000 });
+    await h.restart();
+    expect(h.project.svc.state.limitedUntil).toBeNull();
+    expect(events(h, "quota.resumed").at(-1)?.summary).toMatch(/restarted: trying the team's API keys again/);
   });
 
   it("the kill switch stops engine runs at once and the tasks keep their place", async () => {

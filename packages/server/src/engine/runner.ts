@@ -9,6 +9,8 @@ import {
   guardDecision,
   normalizeToolCall,
   parseModelRef,
+  progressSummary,
+  providerPreset,
   parseStreamLine,
   pickKey,
   realpathDeep,
@@ -19,6 +21,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { killTree, type AgentRunner, type RunHandlers, type RunSpec } from "../runner.ts";
+import { catalogFor, type ModelCatalog } from "./catalog.ts";
 import { chatCompletion } from "./client.ts";
 import type { KeyStore } from "./keys.ts";
 import { loadSession, saveSession } from "./sessions.ts";
@@ -30,6 +33,8 @@ import { runTool, type ToolOutcome } from "./tools.ts";
 
 export interface EngineSettings {
   engine_models: { strong: string[]; fast: string[] };
+  /** Also use each key's best model after the lists (default on). */
+  engine_auto_models?: boolean;
   engine_context_tokens: number;
   /** Turns per run for the built-in engine (the role's own limit still applies when lower). */
   engine_max_turns?: number;
@@ -37,6 +42,8 @@ export interface EngineSettings {
 
 export interface EngineRunnerOptions {
   keys: KeyStore;
+  /** Each key's best model, for the automatic picks (default: the key store's shared catalog). */
+  catalog?: ModelCatalog;
   /** Read at the start of every run, so Settings changes apply to the next run. */
   settings: () => EngineSettings;
 }
@@ -107,14 +114,22 @@ function normalizeCalls(raw: ToolCallMsg[] | undefined, messageIndex: number): {
 
 /**
  * The models a run tries, in order: a per-role model from Settings (when it names a provider; Claude aliases like
- * "sonnet" do not), then its own list (quick or main), then the other list as a backup.
+ * "sonnet" do not), then its own list (quick models for light work, main models otherwise), then (unless turned
+ * off) the automatic choice for its level (small models for light work, the strongest for complex work, from
+ * every working key), then the other list. A provider or model that runs out hands over to the next, and a new key
+ * works at once. Without a level (older callers), the other list comes before the automatic picks.
  */
-export function engineChain(spec: Pick<RunSpec, "model" | "tier">, s: EngineSettings): string[] {
+export function engineChain(spec: Pick<RunSpec, "model" | "tier" | "level">, s: EngineSettings, auto: string[] = []): string[] {
   const { strong, fast } = s.engine_models;
-  const [first, second] = spec.tier === "fast" ? [fast, strong] : [strong, fast];
+  const light = spec.level ? spec.level === "light" : spec.tier === "fast";
+  const [mine, other] = light ? [fast, strong] : [strong, fast];
   const own = spec.model && parseModelRef(spec.model) ? [spec.model] : [];
-  return [...new Set([...own, ...first, ...second])];
+  const autos = s.engine_auto_models === false ? [] : auto;
+  return [...new Set(spec.level ? [...own, ...mine, ...autos, ...other] : [...own, ...mine, ...other, ...autos])];
 }
+
+/** A model that failed in a way that will not change (no tool calling, unknown id) is left out of automatic picks. */
+const PERMANENT_MODEL_ERROR = /tool|not.?found|does not exist|unknown model|no such model|unsupported|not supported|not available|404|not free on this account/i;
 
 export class EngineRunner implements AgentRunner {
   private runs = new Map<string, ActiveEngineRun>();
@@ -137,7 +152,7 @@ export class EngineRunner implements AgentRunner {
   /** The owner clicked Resume (usually after fixing keys): try every key again. */
   reset(): void {
     for (const k of this.opts.keys.list()) if (k.invalid) this.opts.keys.setInvalid(k.id, null);
-    for (const id of Object.keys(this.opts.keys.state)) this.opts.keys.state[id] = { ...this.opts.keys.state[id], cooldownUntil: 0 };
+    this.opts.keys.clearCooldowns();
   }
 
   start(spec: RunSpec, handlers: RunHandlers): { pid: number | undefined } {
@@ -184,11 +199,17 @@ export class EngineRunner implements AgentRunner {
       }
     };
     const settings = this.opts.settings();
-    const chain = engineChain(spec, settings);
+    const catalog = this.opts.catalog ?? catalogFor(this.opts.keys);
+    // The model lists are cached; this only waits when a key is new or a list is hours old.
+    if (settings.engine_auto_models !== false) await catalog.refresh().catch(() => {});
+    const chain = engineChain(spec, settings, settings.engine_auto_models === false ? [] : catalog.autoRefs(spec.level));
     const sessionsDir = spec.sessionsDir ?? path.join(path.dirname(path.dirname(spec.streamFile)), "sessions");
     const sessionId = spec.sessionId;
     const history: ChatMessage[] = (spec.resume ? loadSession(sessionsDir, sessionId) : null) ?? [];
-    history.push({ role: "user", content: spec.prompt });
+    // Resuming (after a pause, a limit, a restart, or an answer): remind the agent what it already did, so it
+    // carries on instead of starting over even when a small model only sees the latest steps.
+    const progress = history.length ? progressSummary(history) : null;
+    history.push({ role: "user", content: progress ? `${spec.prompt}\n\n## Your progress so far in this task\n\n${progress}` : spec.prompt });
     const readSystem = (file: string | undefined) => {
       try {
         return file ? `${ENGINE_PREAMBLE}\n${fs.readFileSync(file, "utf8")}` : null;
@@ -224,6 +245,8 @@ export class EngineRunner implements AgentRunner {
     let retries = 0;
     let usedTool = false;
     let nudged = false;
+    /** Calls that keep failing the same way, to tell the agent to change course. */
+    const repeats = new Map<string, { count: number; output: string }>();
     // Free tiers count requests per day: the engine's own cap stops a confused run early.
     const maxTurns = Math.min(spec.maxTurns, settings.engine_max_turns ?? spec.maxTurns);
 
@@ -279,14 +302,20 @@ export class EngineRunner implements AgentRunner {
         const err = r.error;
         emit({ type: "system", subtype: "api_retry", error: `${pick.ref} (${key.label}'s key): ${err.message}`.slice(0, 300), attempt: retries + 1 });
         if (err.kind === "auth") this.opts.keys.setInvalid(key.id, err.message);
-        else if (err.kind === "limited") this.opts.keys.cooldown(key.id, err.resetsAt ?? Date.now() + 60_000);
+        else if (err.kind === "limited") {
+          // Providers that limit each model separately (Groq, Gemini) keep serving the key's other models.
+          const perModel = providerPreset(key.provider)?.limitScope === "model";
+          this.opts.keys.cooldown(key.id, err.resetsAt ?? Date.now() + 60_000, perModel ? pick.model : undefined);
+        }
         else if (err.kind === "context") {
           // Shrink to the limit the provider reported (or halve), and try again; give up on this model only when
           // not even the short instructions fit.
           let next = err.limit ? Math.floor(err.limit * 0.85) : Math.floor(budget / 2);
-          // Token counts are estimates: if the reported limit does not shrink the request, step down anyway.
+          // Token counts are estimates: if the reported limit does not shrink the request, step down anyway, but
+          // never far below what the provider reported (that would rule the model out for every later run too).
           if (next >= budget) next = Math.floor(budget * 0.8);
-          if (next >= leanTokens + MIN_HISTORY_TOKENS) this.learnedBudgets.set(pick.ref, next);
+          const floor = err.limit ? Math.floor(err.limit * 0.6) : 0;
+          if (next >= floor && next >= leanTokens + MIN_HISTORY_TOKENS) this.learnedBudgets.set(pick.ref, next);
           else skipped.set(pick.ref, err.message);
         } else if (err.kind === "retry") {
           retries++;
@@ -298,6 +327,7 @@ export class EngineRunner implements AgentRunner {
         } else {
           // This model cannot serve the run (no tool calling, unknown id, …): the next model in the list takes over.
           skipped.set(pick.ref, err.message);
+          if (PERMANENT_MODEL_ERROR.test(err.message)) catalog.markBad(pick.ref);
         }
         continue;
       }
@@ -349,6 +379,7 @@ export class EngineRunner implements AgentRunner {
             void this.reportBlock(spec, guard, c, outcome.output);
           } else outcome = await runTool(c.name, c.input, ctx);
         }
+        outcome = this.noteRepeats(repeats, c, outcome);
         emit({ type: "user", session_id: sessionId, message: { role: "user", content: [{ type: "tool_result", tool_use_id: c.id, is_error: !outcome.ok, content: outcome.output }] } });
         history.push({ role: "tool", tool_call_id: c.id, content: outcome.output });
       }
@@ -379,6 +410,27 @@ export class EngineRunner implements AgentRunner {
     });
     await new Promise<void>((resolve) => out.end(resolve));
     h.onExit({ code: isError ? 1 : 0, signal: null, timedOut: e.timedOut, killed: e.killed, stderr: "" });
+  }
+
+  /**
+   * The same call failing with the same message again and again: smaller models tend to repeat a failing command
+   * instead of fixing its cause (a plan submitted seven times with the same missing fields). From the third time,
+   * the result says so, which is usually enough to make the model read the message and change something.
+   */
+  private noteRepeats(repeats: Map<string, { count: number; output: string }>, c: Call, outcome: ToolOutcome): ToolOutcome {
+    const sig = `${c.name}:${JSON.stringify(c.input)}`;
+    if (outcome.ok) {
+      repeats.delete(sig);
+      return outcome;
+    }
+    const prev = repeats.get(sig);
+    const count = prev && prev.output === outcome.output ? prev.count + 1 : 1;
+    repeats.set(sig, { count, output: outcome.output });
+    if (count < 3) return outcome;
+    return {
+      ok: false,
+      output: `${outcome.output}\n\n(AI Software Factory: this exact call has now failed ${count} times with the same result. Running it again will not help. Read the message above, change what it points to (if it describes a format or names a template, open that and follow it), and only then try again.)`,
+    };
   }
 
   private readGuard(spec: RunSpec): (GuardContext & { projectId?: string }) | null {

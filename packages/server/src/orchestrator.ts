@@ -1,4 +1,5 @@
 import {
+  taskLevel,
   budgetTokens,
   emptyUsage,
   formatId,
@@ -139,6 +140,10 @@ export class Orchestrator {
 
   start(): void {
     this.recover();
+    // The built-in engine forgets its keys' cooldowns on a restart, and keys or models may have changed meanwhile:
+    // try them again instead of waiting for the old reset time.
+    const until = this.svc.state.limitedUntil;
+    if (this.svc.settings.engine === "builtin" && until && until > Date.now()) this.retryNow("AI Software Factory restarted: trying the team's API keys again");
     const interval = this.svc.settings.scheduler_interval_ms;
     this.timer = setInterval(() => void this.tick(), interval);
     void this.tick();
@@ -547,6 +552,15 @@ export class Orchestrator {
     }
     // Routine runs get a cheaper model and a tighter turn limit unless the owner set one for the role.
     const maxTurns = settings.max_turns[o.role] ?? Math.min(MODE_MAX_TURNS[o.mode] ?? settings.default_max_turns, settings.default_max_turns);
+    // How demanding the run is: the built-in engine sends light work to small models and complex work to the
+    // strongest (plain code: mode, task size, earlier failures, stakes).
+    const level = taskLevel({
+      mode: o.mode,
+      stage: o.stage === "planning" || o.stage === "answer" ? "implement" : o.stage,
+      size: o.task.size,
+      failures: o.task.run_failures,
+      stakes: this.svc.state.idea?.stakes ?? null,
+    });
     const model = settings.models[o.role] || MODE_MODEL[o.mode];
     const { pid } = this.p.runner.start(
       {
@@ -566,7 +580,8 @@ export class Orchestrator {
         allowedTools: settings.allowed_tools,
         disallowedTools: settings.disallowed_tools,
         timeoutMs: settings.run_timeout_minutes * 60_000,
-        tier: MODE_MODEL[o.mode] ? "fast" : "strong",
+        tier: level === "light" ? "fast" : "strong",
+        level,
         sessionsDir: path.join(this.p.paths.asf, "sessions"),
       },
       {
@@ -580,7 +595,7 @@ export class Orchestrator {
     this.svc.emit(
       "run.started",
       `${o.agent} started ${o.task.kind === "planning" ? `${o.mode}` : `${o.stage} on ${o.task.id}`}${o.resumeSession ? " (resumed)" : ""}`,
-      { stage: o.stage, mode: o.mode, resume: Boolean(o.resumeSession), session: sessionId },
+      { stage: o.stage, mode: o.mode, resume: Boolean(o.resumeSession), session: sessionId, level },
       { actor: o.agent, role: o.role, task: o.task.id, run: runId },
     );
     return runId;
@@ -740,7 +755,7 @@ export class Orchestrator {
       this.svc.patchState({ limitedUntil: until });
       this.svc.emit(
         "quota.limit",
-        `Claude Code usage limit reached; AI Software Factory paused until ${new Date(until).toLocaleTimeString()}`,
+        `Usage limit reached; AI Software Factory paused until ${new Date(until).toLocaleTimeString()}`,
         { resetsAt: until },
         meta,
       );
@@ -1312,6 +1327,21 @@ export class Orchestrator {
     }
     for (const a of st.alerts ?? []) items.push({ kind: "alert", id: `alert:${a.id}`, title: a.text, detail: "", task: a.task ?? null, screen: "board", at: a.ts, action: "dismiss" });
     if (st.paused) items.push({ kind: "team-paused", id: "paused", title: "The team is paused", detail: st.pauseReason ?? "", screen: "agents", at: new Date().toISOString(), action: "resume" });
+    else if (st.limitedUntil && st.limitedUntil > Date.now()) {
+      const at = new Date(st.limitedUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      items.push({
+        kind: "team-paused",
+        id: "limited",
+        title: `Agents are waiting for usage limits to reset (${at})`,
+        detail:
+          this.svc.settings.engine === "builtin"
+            ? `Every API key the agents can use has reached its limit. They carry on by themselves at ${at}. Add a key from another provider (it is tried at once), or click Resume team to try now.`
+            : `Claude Code reported a usage limit. The agents carry on by themselves at ${at}, or click Resume team to try now.`,
+        screen: "keys",
+        at: new Date().toISOString(),
+        action: "resume",
+      });
+    }
     const order: Record<string, number> = { approval: 0, question: 1, blocked: 2, "team-paused": 3, paused: 4, alert: 5 };
     return items.sort((a, b) => order[a.kind]! - order[b.kind]! || String(b.at).localeCompare(String(a.at)));
   }
@@ -1860,6 +1890,21 @@ export class Orchestrator {
   pause(reason = "paused by owner"): void {
     this.svc.patchState({ paused: true, pauseReason: reason });
     this.svc.emit("project.paused", `Scheduler paused: ${reason}`, {}, { actor: "human" });
+  }
+
+  /**
+   * Stop waiting for a usage limit (or a key problem) now: a key was added or fixed, the server restarted, or the
+   * owner clicked Try now. An owner's own pause stays.
+   */
+  retryNow(why: string): void {
+    const st = this.svc.state;
+    const waiting = Boolean(st.limitedUntil && st.limitedUntil > Date.now());
+    const keyPause = st.paused && st.pauseReason === this.authHelp().reason;
+    if (!waiting && !keyPause) return;
+    this.svc.patchState({ limitedUntil: null, ...(keyPause ? { paused: false, pauseReason: null } : {}) });
+    this.p.runner.reset?.();
+    this.svc.emit("quota.resumed", why, {}, { actor: "human" });
+    void this.tick();
   }
 
   resume(): void {

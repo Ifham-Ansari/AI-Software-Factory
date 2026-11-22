@@ -81,6 +81,12 @@ export const settingsSchema = z.object({
   engine_models: z
     .object({ strong: z.array(z.string()).default([]), fast: z.array(z.string()).default([]) })
     .default({ strong: [], fast: [] }),
+  /**
+   * Built-in engine: after the lists above, also use the best model of every key that has one (and only those
+   * when the lists are empty). A new key is used without touching Settings, and a provider that runs out hands
+   * over to the others.
+   */
+  engine_auto_models: z.boolean().default(true),
   /** Built-in engine: each request (system prompt included) is trimmed to about this many tokens. */
   engine_context_tokens: z.number().int().min(8000).default(32_000),
   /** Built-in engine: turns per run. Free tiers count requests per day, so a confused run stops early. */

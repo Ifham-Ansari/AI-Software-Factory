@@ -1,4 +1,4 @@
-import { estimateBuild, GATES, parseStreamLine, planStats, PROVIDERS, providerPreset, quotaCheck, settingsSchema, type Gate, type Identity } from "@asf/core";
+import { estimateBuild, GATES, parseStreamLine, planStats, PROVIDERS, quotaCheck, settingsSchema, type Gate, type Identity } from "@asf/core";
 import { execa } from "execa";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fs from "node:fs";
@@ -6,8 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import type { CmdResult } from "./commands.ts";
+import { catalogFor } from "./engine/catalog.ts";
 import { listModels } from "./engine/client.ts";
-import type { StoredKey } from "./engine/keys.ts";
 import { resolveBin } from "./runner.ts";
 import { commitAll, git } from "./git.ts";
 import { SKILLS_SOURCE } from "./paths.ts";
@@ -201,21 +201,31 @@ export function registerApi(app: FastifyInstance, srv: AsfServer): void {
 
   // -------------------------------------------------------- built-in engine: the team's API keys (owner only)
   // Keys live on this computer (~/.asf/keys.json). Responses never contain a key: only its last four characters.
+  const catalog = catalogFor(srv.keys);
+  /** Projects on the built-in engine that wait for a usage limit (or a key) try again now. */
+  const retryWaitingProjects = (why: string) => {
+    for (const p of srv.projects.values()) if (p.svc.settings.engine === "builtin") p.orch.retryNow(why);
+  };
   app.get(
     "/api/engine",
     wrap(async (req) => {
       human(req);
-      return { providers: PROVIDERS, keys: srv.keys.views(), claudeFound: await claudeInstalled() };
+      // Model lists are cached for hours; this only fetches for a new key or an old list.
+      await catalog.refresh().catch(() => {});
+      return { providers: PROVIDERS, keys: srv.keys.views(), models: catalog.list(), routes: catalog.routes(), claudeFound: await claudeInstalled() };
     }),
   );
   app.post(
     "/api/keys",
-    wrap((req) => {
+    wrap(async (req) => {
       human(req);
       const b = z.object({ provider: z.string().min(1), label: z.string().min(1).max(60), key: z.string().max(500).default(""), baseUrl: z.string().max(300).optional() }).parse(req.body);
       if (b.baseUrl && !/^https?:\/\//i.test(b.baseUrl)) throw new ServiceError("the base URL must start with http:// or https://", 2);
       const k = srv.keys.add(b);
-      modelCache.clear();
+      // Read the new key's models now, so its best model is picked before the next run, and let projects that are
+      // waiting for a usage limit try again with it at once.
+      await catalog.refresh(true).catch(() => {});
+      retryWaitingProjects(`${k.label}'s ${k.provider} key was added: trying again`);
       return srv.keys.views().find((v) => v.id === k.id);
     }),
   );
@@ -224,7 +234,6 @@ export function registerApi(app: FastifyInstance, srv: AsfServer): void {
     wrap((req) => {
       human(req);
       if (!srv.keys.remove((req.params as { id: string }).id)) throw new ServiceError("no such key", 404);
-      modelCache.clear();
       return { ok: true };
     }),
   );
@@ -238,36 +247,22 @@ export function registerApi(app: FastifyInstance, srv: AsfServer): void {
       const r = await listModels(srv.keys.baseUrl(k), k.key);
       if (r.ok) {
         if (k.invalid) srv.keys.setInvalid(k.id, null);
-        return { ok: true, models: r.models.length };
+        await catalog.refresh(true).catch(() => {});
+        retryWaitingProjects(`${k.label}'s ${k.provider} key works: trying again`);
+        const group = k.provider === "custom" ? k.id : k.provider;
+        return { ok: true, models: r.models.length, best: catalog.list().find((p) => p.provider === group)?.best ?? null };
       }
       if (r.error.kind === "auth") srv.keys.setInvalid(k.id, r.error.message);
       return { ok: false, error: r.error.message };
     }),
   );
-  /** Models each provider with a key offers, for the model pickers in Settings. Cached for ten minutes. */
-  const modelCache = new Map<string, { at: number; value: { models: string[]; error?: string } }>();
+  /** Models each provider with a key offers (usable ones, best first), for the model pickers in Settings. */
   app.get(
     "/api/engine/models",
     wrap(async (req) => {
       human(req);
-      const groups = new Map<string, { provider: string; label: string; key: StoredKey }>();
-      for (const k of srv.keys.list().filter((x) => !x.invalid)) {
-        const preset = providerPreset(k.provider);
-        // Custom servers are told apart by their key id ("k_ab12cd:model"); named providers share one list.
-        const id = k.provider === "custom" ? k.id : k.provider;
-        if (!groups.has(id)) groups.set(id, { provider: id, label: k.provider === "custom" ? `${k.label} (${srv.keys.baseUrl(k)})` : (preset?.label ?? k.provider), key: k });
-      }
-      return Promise.all(
-        [...groups.values()].map(async (g) => {
-          const cacheKey = `${g.provider}|${g.key.id}`;
-          const hit = modelCache.get(cacheKey);
-          if (hit && Date.now() - hit.at < 600_000) return { provider: g.provider, label: g.label, ...hit.value };
-          const r = await listModels(srv.keys.baseUrl(g.key), g.key.key);
-          const value = r.ok ? { models: r.models } : { models: [], error: r.error.message };
-          if (r.ok) modelCache.set(cacheKey, { at: Date.now(), value });
-          return { provider: g.provider, label: g.label, ...value };
-        }),
-      );
+      await catalog.refresh().catch(() => {});
+      return catalog.list();
     }),
   );
 
@@ -421,7 +416,11 @@ export function registerApi(app: FastifyInstance, srv: AsfServer): void {
     wrap((req) => {
       human(req);
       const p = project(req);
-      const patch = settingsSchema.partial().parse(req.body);
+      // Validate the fields sent, and change only those. (A partial schema still fills every missing field with its
+      // default, which made each save reset the engine, models, gates, team, and checks to their defaults.)
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const parsed = settingsSchema.partial().parse(body) as Record<string, unknown>;
+      const patch = Object.fromEntries(Object.keys(body).filter((k) => k in parsed).map((k) => [k, parsed[k]]));
       return p.svc.updateSettings(patch);
     }),
   );

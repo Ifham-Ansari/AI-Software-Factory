@@ -25,6 +25,24 @@ import { walkFiles } from "./snapshot.ts";
 // Semantics of every agent command in skills/team-protocol/references/asf-cli.md. The CLI is a thin client:
 // it reads scratch files locally and sends their content; all checks and state changes happen here.
 
+/** Shown with plan problems about unreadable task files or missing fields (see skills/tech-lead/templates/task.md). */
+const TASK_FILE_FORMAT = [
+  "How a task file looks: one Markdown file per task, .asf/tasks/<ID>.md (only .md files are read), starting with a",
+  "YAML header between --- lines. owns and verify are required:",
+  "---",
+  "id: T001",
+  "title: Home page",
+  "role: frontend",
+  "after: [T000]                      # tasks that must be done first",
+  "owns: [frontend/src/app/page.tsx, frontend/src/app/page.test.tsx]   # files only this task changes",
+  "may_touch: []",
+  'verify: "cd frontend && pnpm test page"   # a command that passes when the task is done',
+  "size: S                            # S, M, or L",
+  "---",
+  "## Goal",
+  "…",
+].join("\n");
+
 export interface CmdResult {
   text: string;
   data?: unknown;
@@ -453,7 +471,16 @@ export class Commands {
     const r = checkPlan(files, repoFiles);
     const stats = r.tasks.length ? planStats(r.tasks) : null;
     if (!r.ok) {
-      return { exit: 1, text: `Plan has ${r.problems.length} problem(s):\n${r.problems.map((p) => `  [${p.code}] ${p.message}`).join("\n")}`, data: { ok: false, problems: r.problems } };
+      // A file the parser cannot read, or one missing fields, usually means the format is unknown to the agent:
+      // show it right here instead of leaving the agent to guess (smaller models otherwise repeat the same mistake).
+      const formatHelp = r.problems.some((p) => p.code === "parse" || p.code === "missing_field")
+        ? `\n\n${TASK_FILE_FORMAT}\nFull template with every section: ${this.p.skillsDir().replace(/\\/g, "/")}/tech-lead/templates/task.md`
+        : "";
+      return {
+        exit: 1,
+        text: `Plan has ${r.problems.length} problem(s):\n${r.problems.map((p) => `  [${p.code}] ${p.message}`).join("\n")}${formatHelp}`,
+        data: { ok: false, problems: r.problems },
+      };
     }
     return {
       text: `Plan OK: ${r.tasks.length} tasks, critical path ${stats!.criticalPath.join(" -> ")}, peak ${stats!.peakLanes} parallel lanes.`,

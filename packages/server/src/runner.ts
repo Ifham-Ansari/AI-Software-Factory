@@ -26,6 +26,8 @@ export interface RunSpec {
   timeoutMs: number;
   /** Built-in engine: which model chain from Settings (routine modes use the fast one). */
   tier?: "strong" | "fast";
+  /** Built-in engine: how demanding the run is, which picks the size of model (see taskLevel in core). */
+  level?: "light" | "standard" | "heavy";
   /** Built-in engine: where conversations are kept for resuming (`.asf/sessions`). */
   sessionsDir?: string;
   /** Built-in engine: the system prompt with the skills listed by path, for models with a small per-request limit. */

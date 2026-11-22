@@ -154,6 +154,31 @@ export function Shell({ pid, screen, children }: { pid: string; screen: string; 
   );
 }
 
+/** Agents wait for a usage limit to reset: say until when, and offer to try now (after adding a key, say). */
+function LimitWait({ pid, until }: { pid: string; until: number }) {
+  const retry = useAction(pid, "POST", "/control/resume");
+  const at = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return (
+    <span
+      className="mono inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--warn)_45%,transparent)] bg-warn-soft py-0.5 pr-1 pl-2.5 text-[11px] leading-5 text-warn"
+      role="status"
+      data-testid="limit-wait"
+      title="Every key or account the agents can use has reached its usage limit. They carry on by themselves at this time."
+    >
+      <span aria-hidden className="pulse-dot h-1.5 w-1.5 rounded-full bg-warn" />
+      waiting for usage limits until {at}
+      <button
+        type="button"
+        className="ml-1 rounded-full border border-[color-mix(in_srgb,var(--warn)_45%,transparent)] px-2 font-semibold hover:bg-warn hover:text-chrome"
+        disabled={retry.isPending}
+        onClick={() => retry.mutate({}, { onSuccess: () => toast("Trying again now"), onError: toastError })}
+      >
+        Try now
+      </button>
+    </span>
+  );
+}
+
 function LiveStatus({ pid }: { pid: string }) {
   const { status } = useEvents(pid);
   const label = status === "live" ? "live" : status === "connecting" ? "connecting" : "offline, retrying";
@@ -219,6 +244,7 @@ function Header({ pid, p }: { pid: string; p: ProjectInfo | undefined }) {
             paused{p.state.pauseReason ? `: ${p.state.pauseReason}` : ""}
           </span>
         )}
+        {!p?.state.paused && (p?.state.limitedUntil ?? 0) > Date.now() && <LimitWait pid={pid} until={p!.state.limitedUntil!} />}
         <div className="ml-auto flex items-center gap-2">
           <RequestChangeButton pid={pid} p={p} />
           <Bell pid={pid} />

@@ -42,6 +42,7 @@ Architecture decision records, oldest first. Each one states the context, the de
 | [0012](decisions/0012-rename-to-ai-software-factory.md) | Rename to AI Software Factory (`asf`) |
 | [0013](decisions/0013-logged-out-claude-pauses.md) | A logged-out Claude Code pauses the team instead of failing tasks |
 | [0014](decisions/0014-builtin-engine.md) | A built-in engine that runs agents on the team's own API keys |
+| [0015](decisions/0015-models-by-task.md) | Choosing models by task, from every free provider |
 
 ## Project history
 

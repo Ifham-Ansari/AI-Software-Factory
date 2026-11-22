@@ -139,6 +139,8 @@ export interface Settings {
   engine?: "claude-code" | "builtin";
   /** Built-in engine: models to try in order, as provider:model. */
   engine_models?: { strong: string[]; fast: string[] };
+  /** Also use each key's best model after the lists (default on). */
+  engine_auto_models?: boolean;
   engine_context_tokens?: number;
   engine_max_turns?: number;
 }
@@ -149,8 +151,16 @@ export interface ProviderPreset {
   baseUrl: string;
   keyUrl?: string;
   keyless?: boolean;
+  /** Works without a key at a low limit. */
+  keyOptional?: boolean;
+  /** The base URL holds the owner's own part (an account id). */
+  needsBaseUrl?: boolean;
+  /** free: ongoing free tier; trial: one-time credit; local: on this computer. */
+  tier?: "free" | "trial" | "local";
   note: string;
 }
+
+export type TaskLevel = "light" | "standard" | "heavy";
 
 export interface KeyView {
   id: string;
@@ -162,19 +172,27 @@ export interface KeyView {
   addedAt: string;
   invalid: string | null;
   cooldownUntil: number | null;
+  /** Models of this key at their own limit right now (its other models still work). */
+  modelsLimited?: number;
   usageToday: { requests: number; input: number; output: number };
 }
 
 export interface EngineInfo {
   providers: ProviderPreset[];
   keys: KeyView[];
+  /** Each provider with a working key: its usable models (best first) and its automatic pick. */
+  models: ProviderModels[];
+  /** The models each level of task would use right now, in order. */
+  routes?: Record<TaskLevel, string[]>;
   claudeFound: boolean;
 }
 
 export interface ProviderModels {
+  /** Before the colon in a model reference: a provider id, or a custom server's key id. */
   provider: string;
   label: string;
   models: string[];
+  best?: string | null;
   error?: string;
 }
 

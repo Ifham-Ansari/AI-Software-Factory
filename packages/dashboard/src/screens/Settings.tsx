@@ -428,6 +428,7 @@ function EngineSection({
   const chains = draft.engine_models ?? EMPTY_CHAINS;
   const usable = (engine.data?.keys ?? []).filter((k) => !k.invalid).length;
   const options = (models.data ?? []).flatMap((g) => g.models.map((m) => `${g.provider}:${m}`));
+  const picks = (models.data ?? []).flatMap((g) => (g.best ? [{ ref: `${g.provider}:${g.best}`, label: g.label }] : []));
   const setChain = (tier: "strong" | "fast", list: string[]) => set("engine_models", { ...chains, [tier]: list });
   return (
     <>
@@ -481,6 +482,63 @@ function EngineSection({
           </Row>
           <Row label="Quick models" hint="For sizing requests, answers, reviews, and checks. Empty: the main models.">
             <ModelChain testId="chain-fast" list={chains.fast} options={options} onChange={(l) => setChain("fast", l)} />
+          </Row>
+          <Row
+            label="Automatic model choice"
+            hint="Picked by task from every working key's models (free ones only): small, fast models for light work, the strongest for complex work, so the big models' free limits are kept for what needs them. A task that failed moves up a level. Used after your own lists; a key you add works at once, and when a model or provider runs out the next one takes over."
+          >
+            <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                className="accent-(--accent)"
+                checked={draft.engine_auto_models !== false}
+                onChange={(e) => set("engine_auto_models", e.target.checked)}
+                data-testid="engine-auto"
+              />
+              Choose models automatically by task (recommended)
+            </label>
+            {draft.engine_auto_models !== false && (
+              <div className="mt-2 flex flex-col gap-2">
+                {picks.length === 0 ? (
+                  <span className="text-[12.5px] text-ink-3" data-testid="engine-auto-picks">
+                    No models yet: add a working key.
+                  </span>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-[150px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[12.5px]" data-testid="engine-routes">
+                      {(
+                        [
+                          ["light", "Light work", "sizing requests, answers, small tasks"],
+                          ["standard", "Standard work", "medium tasks, reviews, discovery"],
+                          ["heavy", "Complex work", "PRD, design, architecture, plan, large tasks, retries"],
+                        ] as const
+                      ).map(([level, title, what]) => (
+                        <div key={level} className="contents" data-testid={`route-${level}`}>
+                          <span>
+                            <span className="block font-medium">{title}</span>
+                            <span className="block text-[11.5px] text-ink-3">{what}</span>
+                          </span>
+                          <span className="flex flex-wrap items-center gap-1">
+                            {(engine.data?.routes?.[level] ?? []).slice(0, 4).map((ref, i) => (
+                              <span key={ref} className={`mono rounded-md border px-1.5 py-0.5 text-[11.5px] ${i === 0 ? "border-accent bg-accent-soft" : "border-rule bg-surface text-ink-2"}`}>
+                                {ref}
+                              </span>
+                            ))}
+                            {(engine.data?.routes?.[level]?.length ?? 0) > 4 && (
+                              <span className="text-[11.5px] text-ink-3">+{(engine.data?.routes?.[level]?.length ?? 0) - 4} more as backups</span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <span className="text-[12px] text-ink-3" data-testid="engine-auto-picks">
+                      Best model of each key: {picks.map((p) => p.ref).join(", ")}.
+                      {chains.strong.length === 0 && chains.fast.length === 0 ? " Your lists are empty, so the automatic choice is used for every run." : ""}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
           </Row>
           {models.data?.some((g) => g.error) && (
             <div className="mt-2 text-[12px] text-warn">
@@ -545,22 +603,39 @@ function ModelChain({ list, options, onChange, testId }: { list: string[]; optio
     onChange([...list, v]);
     setNext("");
   };
+  // A provider whose usable models are known, but this one is not among them: usually a paid model (or a retired
+  // one) that would fail every time on a free account.
+  const listed = new Set(options);
+  const providersListed = new Set(options.map((o) => o.slice(0, o.indexOf(":"))));
+  const notFree = (m: string) => providersListed.has(m.slice(0, m.indexOf(":"))) && !listed.has(m);
   return (
     <div className="flex flex-col gap-1.5" data-testid={testId}>
       {list.length === 0 && <div className="text-[12.5px] text-ink-3">None yet.</div>}
       {list.map((m, i) => (
-        <div key={m} className="flex items-center gap-2">
-          <span className="mono w-5 text-right text-[11px] text-ink-3">{i + 1}</span>
-          <span className="mono min-w-0 flex-1 truncate rounded-md border border-rule bg-surface px-2 py-1 text-[12px]">{m}</span>
-          <button type="button" className="btn btn-sm" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${m} up`}>
-            ↑
-          </button>
-          <button type="button" className="btn btn-sm" disabled={i === list.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${m} down`}>
-            ↓
-          </button>
-          <button type="button" className="btn btn-sm" onClick={() => onChange(list.filter((x) => x !== m))} aria-label={`Remove ${m}`}>
-            ✕
-          </button>
+        <div key={m} className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <span className="mono w-5 text-right text-[11px] text-ink-3">{i + 1}</span>
+            <span
+              className={`mono min-w-0 flex-1 truncate rounded-md border px-2 py-1 text-[12px] ${notFree(m) ? "border-[color-mix(in_srgb,var(--warn)_50%,transparent)] bg-warn-soft" : "border-rule bg-surface"}`}
+              title={m}
+            >
+              {m}
+            </span>
+            <button type="button" className="btn btn-sm" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${m} up`}>
+              ↑
+            </button>
+            <button type="button" className="btn btn-sm" disabled={i === list.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${m} down`}>
+              ↓
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => onChange(list.filter((x) => x !== m))} aria-label={`Remove ${m}`}>
+              ✕
+            </button>
+          </div>
+          {notFree(m) && (
+            <div className="pl-7 text-[11.5px] text-warn" data-testid="model-not-free">
+              Not a free model here: its provider does not list it among the free models for agents, so it would fail every run. Pick its free version or remove it.
+            </div>
+          )}
         </div>
       ))}
       <div className="flex gap-2">

@@ -16,7 +16,7 @@ export interface QuotaDecision {
 export function quotaCheck(settings: Settings, state: QuotaState, now = Date.now()): QuotaDecision {
   const allowance = settings.daily_token_budget > 0 ? Math.floor((settings.daily_token_budget * (100 - settings.reserve_percent)) / 100) : Infinity;
   if (state.limitedUntil && state.limitedUntil > now) {
-    return { ok: false, reason: `Claude Code usage limit; resumes at ${new Date(state.limitedUntil).toISOString()}`, allowance };
+    return { ok: false, reason: `usage limit reached; resumes at ${new Date(state.limitedUntil).toISOString()}`, allowance };
   }
   if (state.usedToday >= allowance) {
     return { ok: false, reason: `daily budget reached (${state.usedToday} of ${allowance} tokens AI Software Factory may use)`, allowance };

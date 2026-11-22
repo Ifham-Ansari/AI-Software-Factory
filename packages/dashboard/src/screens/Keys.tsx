@@ -4,12 +4,20 @@ import { api } from "../lib/api";
 import { fmtTokens, plural } from "../lib/format";
 import { useEngine, useKeyAction, useProject } from "../lib/queries";
 import { href } from "../lib/router";
-import type { KeyView, ProviderPreset } from "../lib/types";
+import type { KeyView, ProviderModels, ProviderPreset } from "../lib/types";
 
 // The team's API keys for the built-in engine. They are kept on this computer (~/.asf/keys.json), shared by
 // every project here, and never shown again in full: the server only ever returns the last four characters.
 
 const until = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+const worksText = (label: string, r: { models?: number; best?: string | null }) =>
+  `${label}'s key works (${r.models} models)${r.best ? `. Best model: ${r.best}, used automatically.` : ""}`;
+
+/** Each key's provider pick (custom servers by key id, named providers by provider). */
+function bestByKey(keys: KeyView[], models: ProviderModels[]): Record<string, string | null> {
+  return Object.fromEntries(keys.map((k) => [k.id, models.find((m) => m.provider === (k.provider === "custom" ? k.id : k.provider))?.best ?? null]));
+}
 
 function KeyStatus({ k }: { k: KeyView }) {
   if (k.invalid)
@@ -19,6 +27,12 @@ function KeyStatus({ k }: { k: KeyView }) {
       </Badge>
     );
   if (k.cooldownUntil) return <Badge tone="warn">limited until {until(k.cooldownUntil)}</Badge>;
+  if (k.modelsLimited)
+    return (
+      <Badge tone="ok" title="Some of this key's models are at their own limit; its other models keep working.">
+        ready · {plural(k.modelsLimited, "model")} resting
+      </Badge>
+    );
   return <Badge tone="ok">ready</Badge>;
 }
 
@@ -51,7 +65,7 @@ export function KeysScreen({ pid }: { pid: string }) {
         {(e) => (
           <>
             <AddKeyForm providers={e.providers} />
-            <KeyList keys={e.keys} providers={e.providers} />
+            <KeyList keys={e.keys} providers={e.providers} best={bestByKey(e.keys, e.models ?? [])} />
             <TeamUsage keys={e.keys} />
           </>
         )}
@@ -71,7 +85,13 @@ function AddKeyForm({ providers }: { providers: ProviderPreset[] }) {
   const [key, setKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const preset = providers.find((p) => p.id === provider);
-  const needsUrl = provider === "custom" || Boolean(preset?.keyless);
+  const needsUrl = provider === "custom" || Boolean(preset?.keyless) || Boolean(preset?.needsBaseUrl);
+  const groups: [string, ProviderPreset[]][] = [
+    ["Free tiers", providers.filter((p) => (p.tier ?? "free") === "free" && p.id !== "custom")],
+    ["On this computer", providers.filter((p) => p.tier === "local")],
+    ["Trial credit only", providers.filter((p) => p.tier === "trial")],
+    ["Other", providers.filter((p) => p.id === "custom")],
+  ];
   const add = useKeyAction<{ provider: string; label: string; key: string; baseUrl?: string }, KeyView>("POST", () => "/api/keys");
   return (
     <form
@@ -86,8 +106,8 @@ function AddKeyForm({ providers }: { providers: ProviderPreset[] }) {
               setKey("");
               toast(`Key added for ${k.label}. Checking it…`);
               try {
-                const r = await api<{ ok: boolean; models?: number; error?: string }>("POST", `/api/keys/${k.id}/test`, {});
-                toast(r.ok ? `${k.label}'s key works (${r.models} models)` : `${k.label}'s key did not work: ${r.error}`, r.ok ? "ok" : "danger");
+                const r = await api<{ ok: boolean; models?: number; best?: string | null; error?: string }>("POST", `/api/keys/${k.id}/test`, {});
+                toast(r.ok ? worksText(k.label, r) : `${k.label}'s key did not work: ${r.error}`, r.ok ? "ok" : "danger");
               } catch (err) {
                 toastError(err);
               }
@@ -106,15 +126,22 @@ function AddKeyForm({ providers }: { providers: ProviderPreset[] }) {
             value={provider}
             onChange={(ev) => {
               setProvider(ev.target.value);
-              setBaseUrl("");
+              // A URL with the owner's own part to fill in starts from the provider's template.
+              setBaseUrl(providers.find((p) => p.id === ev.target.value)?.needsBaseUrl ? (providers.find((p) => p.id === ev.target.value)?.baseUrl ?? "") : "");
             }}
             aria-label="Provider"
           >
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
+            {groups
+              .filter(([, list]) => list.length)
+              .map(([title, list]) => (
+                <optgroup key={title} label={title}>
+                  {list.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
           </select>
         </label>
         <label className="flex flex-col gap-1 text-[12px] text-ink-2">
@@ -122,19 +149,19 @@ function AddKeyForm({ providers }: { providers: ProviderPreset[] }) {
           <input className="field" placeholder="e.g. Ayesha" value={label} onChange={(ev) => setLabel(ev.target.value)} maxLength={60} required aria-label="Whose key" />
         </label>
         {preset?.keyless ? (
-          <div className="pb-2 text-[12.5px] text-ink-3">No key needed for a model running on this computer.</div>
+          <div className="pb-2 text-[12.5px] text-ink-3">{preset.tier === "local" ? "No key needed for a model running on this computer." : "No key needed: it works anonymously."}</div>
         ) : (
           <label className="flex flex-col gap-1 text-[12px] text-ink-2">
-            API key
+            API key{preset?.keyOptional ? " (optional: raises the limit)" : ""}
             <input
               className="field mono text-[12px]"
               type="password"
               autoComplete="off"
               spellCheck={false}
-              placeholder="paste the key"
+              placeholder={preset?.keyOptional ? "leave empty to use it without a key" : "paste the key"}
               value={key}
               onChange={(ev) => setKey(ev.target.value)}
-              required
+              required={!preset?.keyOptional}
               aria-label="API key"
             />
           </label>
@@ -145,13 +172,18 @@ function AddKeyForm({ providers }: { providers: ProviderPreset[] }) {
       </div>
       {needsUrl && (
         <label className="flex flex-col gap-1 text-[12px] text-ink-2">
-          Base URL {provider === "custom" ? "(OpenAI-compatible, usually ending in /v1)" : "(change it if the server runs on another port)"}
+          Base URL{" "}
+          {provider === "custom"
+            ? "(OpenAI-compatible, usually ending in /v1)"
+            : preset?.needsBaseUrl
+              ? "(replace the {…} part with your own, e.g. your account id)"
+              : "(change it if the server runs on another port)"}
           <input
             className="field mono text-[12px]"
             placeholder={preset?.baseUrl || "https://example.com/v1"}
             value={baseUrl}
             onChange={(ev) => setBaseUrl(ev.target.value)}
-            required={provider === "custom"}
+            required={provider === "custom" || Boolean(preset?.needsBaseUrl)}
             aria-label="Base URL"
           />
         </label>
@@ -160,7 +192,7 @@ function AddKeyForm({ providers }: { providers: ProviderPreset[] }) {
         <span>{preset?.note}</span>
         {preset?.keyUrl && (
           <a className="font-medium text-accent underline-offset-2 hover:underline" href={preset.keyUrl} target="_blank" rel="noreferrer noopener">
-            Get a free key ↗
+            {preset.tier === "trial" ? "Get a key ↗" : "Get a free key ↗"}
           </a>
         )}
       </div>
@@ -168,10 +200,10 @@ function AddKeyForm({ providers }: { providers: ProviderPreset[] }) {
   );
 }
 
-function KeyList({ keys, providers }: { keys: KeyView[]; providers: ProviderPreset[] }) {
+function KeyList({ keys, providers, best }: { keys: KeyView[]; providers: ProviderPreset[]; best: Record<string, string | null> }) {
   const [removing, setRemoving] = useState<KeyView | null>(null);
   const remove = useKeyAction<string>("DELETE", (id) => `/api/keys/${id}`);
-  const test = useKeyAction<string, { ok: boolean; models?: number; error?: string }>("POST", (id) => `/api/keys/${id}/test`);
+  const test = useKeyAction<string, { ok: boolean; models?: number; best?: string | null; error?: string }>("POST", (id) => `/api/keys/${id}/test`);
   const name = (id: string) => providers.find((p) => p.id === id)?.label ?? id;
   if (!keys.length)
     return (
@@ -191,6 +223,11 @@ function KeyList({ keys, providers }: { keys: KeyView[]; providers: ProviderPres
               <div className="mono text-[11.5px] text-ink-3">
                 {k.masked} · {plural(k.usageToday.requests, "request")} today · {fmtTokens(k.usageToday.input + k.usageToday.output)} tokens
               </div>
+              {!k.invalid && best[k.id] && (
+                <div className="mt-0.5 text-[12px] text-ink-2" data-testid={`key-best-${k.id}`}>
+                  best model: <span className="mono text-[11.5px] text-accent">{best[k.id]}</span>
+                </div>
+              )}
               {k.invalid && <div className="mono mt-0.5 text-[11.5px] text-danger">{k.invalid}</div>}
             </div>
             <KeyStatus k={k} />
@@ -199,7 +236,7 @@ function KeyList({ keys, providers }: { keys: KeyView[]; providers: ProviderPres
               disabled={test.isPending}
               onClick={() =>
                 test.mutate(k.id, {
-                  onSuccess: (r) => toast(r.ok ? `${k.label}'s key works (${r.models} models)` : `${k.label}'s key did not work: ${r.error}`, r.ok ? "ok" : "danger"),
+                  onSuccess: (r) => toast(r.ok ? worksText(k.label, r) : `${k.label}'s key did not work: ${r.error}`, r.ok ? "ok" : "danger"),
                   onError: toastError,
                 })
               }

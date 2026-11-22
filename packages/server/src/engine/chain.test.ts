@@ -14,6 +14,13 @@ describe("which models a run tries", () => {
     expect(engineChain({ tier: "fast" }, settings(["a:x"], []))).toEqual(["a:x"]);
   });
 
+  it("adds each key's best model after the lists, unless turned off", () => {
+    const s = settings(["a:x"], []);
+    expect(engineChain({ tier: "strong" }, s, ["b:best", "a:x"])).toEqual(["a:x", "b:best"]);
+    expect(engineChain({ tier: "strong" }, settings([], []), ["b:best"])).toEqual(["b:best"]);
+    expect(engineChain({ tier: "strong" }, { ...s, engine_auto_models: false }, ["b:best"])).toEqual(["a:x"]);
+  });
+
   it("puts a per-role provider model first, and ignores Claude aliases", () => {
     const s = settings(["a:x"], ["b:y"]);
     expect(engineChain({ tier: "strong", model: "c:z" }, s)).toEqual(["c:z", "a:x", "b:y"]);

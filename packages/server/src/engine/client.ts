@@ -1,4 +1,4 @@
-import { classifyProviderError, type ChatMessage, type ProviderError, type ToolCallMsg, type ToolDef } from "@asf/core";
+import { classifyProviderError, type ChatMessage, type ModelInfo, type ProviderError, type ToolCallMsg, type ToolDef } from "@asf/core";
 
 // A minimal client for OpenAI-compatible /chat/completions. No SDK: every free provider speaks this format.
 // Keys are only ever put in the Authorization header and scrubbed from any error text.
@@ -81,10 +81,34 @@ export async function chatCompletion(req: ChatRequest): Promise<ChatResult> {
   };
 }
 
-/** List a provider's models (free: no tokens used). Used to test a key and to fill the model pickers. */
-export async function listModels(baseUrl: string, apiKey: string, timeoutMs = 15_000): Promise<{ ok: true; models: string[] } | { ok: false; error: ProviderError }> {
+/** What a provider's GET /models says about one model, in the fields each provider uses. */
+function toModelInfo(m: any): ModelInfo {
+  const id = String(m?.id ?? m?.name ?? "").replace(/^models\//, "");
+  const ctx = Number(m?.context_length ?? m?.context_window ?? m?.max_context_length ?? m?.inputTokenLimit ?? 0) || undefined;
+  // OpenRouter lists supported parameters; Mistral lists capabilities; Cohere lists features.
+  const params: unknown = m?.supported_parameters;
+  const features: unknown = m?.features;
+  const tools = Array.isArray(params)
+    ? params.includes("tools")
+    : typeof m?.capabilities?.function_calling === "boolean"
+      ? Boolean(m.capabilities.function_calling)
+      : Array.isArray(features)
+        ? features.includes("tools")
+        : undefined;
+  const pricing = m?.pricing;
+  const free = pricing ? Number(pricing.prompt) === 0 && Number(pricing.completion) === 0 : id.endsWith(":free") || undefined;
+  return { id, ...(ctx ? { contextWindow: ctx } : {}), ...(tools !== undefined ? { tools } : {}), ...(free !== undefined ? { free } : {}) };
+}
+
+/** List a provider's models (free: no tokens used). Used to test a key, to fill the model pickers, and to pick the best model. */
+export async function listModels(
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs = 15_000,
+  modelsUrl?: string,
+): Promise<{ ok: true; models: ModelInfo[] } | { ok: false; error: ProviderError }> {
   try {
-    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+    const res = await fetch(modelsUrl ?? `${baseUrl.replace(/\/+$/, "")}/models`, {
       headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -95,7 +119,8 @@ export async function listModels(baseUrl: string, apiKey: string, timeoutMs = 15
     }
     const j = JSON.parse(text) as any;
     const list: any[] = Array.isArray(j?.data) ? j.data : Array.isArray(j?.models) ? j.models : [];
-    const models = list.map((m) => String(m.id ?? m.name ?? "").replace(/^models\//, "")).filter(Boolean).sort();
+    // Groq marks retired models inactive.
+    const models = list.filter((m) => m?.active !== false).map(toModelInfo).filter((m) => m.id).sort((a, b) => a.id.localeCompare(b.id));
     return { ok: true, models };
   } catch (e) {
     return { ok: false, error: { kind: "retry", message: scrub(`could not reach ${baseUrl}: ${(e as Error).message}`, apiKey) } };

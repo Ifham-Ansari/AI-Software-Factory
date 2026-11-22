@@ -93,13 +93,22 @@ function bodyMessage(body: string): string {
 const CONTEXT_RE = /context[_ ]length|context window|maximum context|too many tokens|prompt is too long|reduce the length|request too large|input.{0,20}too long/i;
 const QUOTA_RE = /quota|rate[_ -]?limit|resource[_ ]exhausted|too many requests|credits/i;
 
+/**
+ * The model is not free on this account: it needs credits or a paid plan. Waiting does not help, so it is not a
+ * rate limit (OpenRouter's "requires more credits", Z.ai's "Insufficient balance or no resource package").
+ * OpenRouter's daily free cap ("free-models-per-day … Add 10 credits to unlock …") is a limit, and does not match.
+ */
+const PAYMENT_RE = /requires more credits|insufficient (account )?balance|no resource package|payment required|not available on (the|your) free (tier|plan)/i;
+
 export function classifyProviderError(status: number, headers: Record<string, string>, body: string, now = Date.now()): ProviderError {
   const message = `HTTP ${status}: ${bodyMessage(body)}`;
   if (status === 401 || status === 403) return { kind: "auth", message };
+  // A paid model on a free account fails the same way every time: rule the model out instead of waiting.
+  if (status === 402 || PAYMENT_RE.test(body)) return { kind: "fatal", message: `${message} (this model is not free on this account)` };
   if (status === 429) return { kind: "limited", resetsAt: rateLimitResetAt(headers, body, now), message };
   if (status === 413 || CONTEXT_RE.test(body)) return { kind: "context", limit: reportedTokenLimit(body), message };
-  // Some providers answer a used-up free quota with 402 or 400 plus a quota message.
-  if (status === 402 || (status === 400 && QUOTA_RE.test(body))) return { kind: "limited", resetsAt: rateLimitResetAt(headers, body, now), message };
+  // Some providers answer a used-up free quota with 400 plus a quota message.
+  if (status === 400 && QUOTA_RE.test(body)) return { kind: "limited", resetsAt: rateLimitResetAt(headers, body, now), message };
   if (status === 408 || status >= 500 || status === 0) return { kind: "retry", message };
   return { kind: "fatal", message };
 }

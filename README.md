@@ -71,7 +71,7 @@ Pick **Auto** (the default) to let the tech lead decide, or choose a track yours
 | | |
 |---|---|
 | 🏠 **Local first** | Runs on your machine, binds to `127.0.0.1`, requires a random access token, and has no telemetry or cloud service. |
-| 🔑 **Your subscription, or none** | Uses the official `claude` CLI with your own login, and never reads or stores your Claude credentials. No subscription? The built-in engine runs on free API keys (Gemini, Groq, OpenRouter, Mistral, Cerebras) or a local model (Ollama, LM Studio). A team can pool each member's own key, and work moves to the next key when one hits its limit. |
+| 🔑 **Your subscription, or none** | Uses the official `claude` CLI with your own login, and never reads or stores your Claude credentials. No subscription? The built-in engine runs on free API keys from 14 providers (Gemini, Groq, OpenRouter, NVIDIA, Mistral, Z.ai, Cloudflare, and more, one even without a key) or a local model (Ollama, LM Studio). It picks a small model for light tasks and the strongest for complex ones, a team can pool each member's own keys, and work moves to the next model or key when one hits its limit. |
 | 🧭 **You stay in charge** | Approval gates for the PRD, design, architecture, plan, and release, plus a kill switch. Agents ask you before anything that costs money, needs a key, or changes scope. |
 | 🧱 **Real engineering, not vibes** | Contracts before code and test-first tasks. A `verify` command must pass before a task counts as done. Every task gets independent code review, QA with bug reports, and project checks after it finishes. |
 | 👀 **Watch them work** | Each agent's card shows what it is doing in plain words ("Running the tests", "Messaging the frontend engineer"), its own plan as a live checklist with a progress bar, the files it touched, and where its task is. |
@@ -166,7 +166,7 @@ asf up                  # starts AI Software Factory and opens the dashboard for
 
 ### No Claude subscription? Use free API keys
 
-1. Open **API keys** in the dashboard, pick a provider (Gemini, Groq, OpenRouter, Mistral, Cerebras, or Ollama / LM Studio on your own computer), follow its "Get a free key" link, and add the key under your name. Teammates add their own keys the same way, on the same computer.
+1. Open **API keys** in the dashboard, pick a provider (Gemini, Groq, OpenRouter, NVIDIA, Mistral, Z.ai, Cloudflare, and more, or Ollama / LM Studio on your own computer), follow its "Get a free key" link, and add the key under your name. Teammates add their own keys the same way, on the same computer.
 2. In **Settings → Agent engine**, choose **Built-in engine**, pick a model or two from the live list, and save.
 3. Send a small request first. Free tiers limit requests per day: the [built-in engine guide](docs/engine.md) explains how to choose models and make the limits last.
 
@@ -337,7 +337,7 @@ Most settings live in the dashboard (**Settings**) and are stored per project:
 
 | Setting | Default | Notes |
 |---|---|---|
-| Agent engine | Claude Code | Or the built-in engine, on the team's API keys: then main and quick models (ordered `provider:model` lists), the size of each request (32k tokens), and turns per run (50) |
+| Agent engine | Claude Code | Or the built-in engine, on the team's API keys: then main and quick models (ordered `provider:model` lists; optional), automatic model choice by task (small models for light work, the strongest for complex work; on), the size of each request (32k tokens), and turns per run (50) |
 | Max concurrent agents | 3 | Total agents running at once |
 | Daily token cap | off | Optional. No new runs start once the cap is reached |
 | Approval gates | all on | PRD, design direction, screen designs, architecture, plan, release. Each can auto-approve |
@@ -384,7 +384,7 @@ With Claude Code, only Claude Code talks to Claude, exactly as when you use `cla
 <details>
 <summary><b>Can I use it without a Claude subscription?</b></summary>
 
-Yes. Choose the **built-in engine** in Settings and add a free API key (Gemini, Groq, OpenRouter, Mistral, Cerebras) on **API keys**, or run a model on your own computer with Ollama or LM Studio. A team can each add their own key on the computer that runs AI Software Factory. Free models are weaker than Claude at long builds: small and medium requests work well. See the [built-in engine guide](docs/engine.md).
+Yes. Choose the **built-in engine** in Settings and add free API keys (Gemini, Groq, OpenRouter, NVIDIA, Mistral, Z.ai, Cloudflare, and more: the [guide](docs/engine.md#free-providers) lists 14) on **API keys**, or run a model on your own computer with Ollama or LM Studio. A team can each add their own key on the computer that runs AI Software Factory. Free models are weaker than Claude at long builds: small and medium requests work well. See the [built-in engine guide](docs/engine.md).
 </details>
 
 <details>
@@ -437,6 +437,7 @@ Not as such, but the built-in engine runs agents on any OpenAI-compatible API (i
 |---|---|
 | `asf doctor` says Claude Code is missing | Install Claude Code, run `claude` once to log in, then `asf doctor --login`. Or use the built-in engine with free API keys: `asf keys providers` |
 | Paused: "No working API key" | Add or fix a key on **API keys** (or `asf keys test`), check the models in **Settings → Agent engine**, then click **Resume** |
+| Header: "waiting for usage limits until …" | Every key (or your Claude account) has hit its limit. The agents carry on by themselves at that time, without starting over. To go on sooner, add a key from another provider (it is tried at once) or click **Try now** |
 | Built-in engine: agents finish without doing the work | The model is too small or cannot call tools. Choose a bigger model with tool calling ([guide](docs/engine.md#choosing-models)) |
 | The dashboard says "open the link printed by asf up" | The page needs the token. Use the full link from the terminal, or run `asf up` again to print it |
 | Port 4800 is in use | `asf up --port 4801` |

@@ -28,10 +28,12 @@ test("API keys: teammates add their keys (shown masked), test them, and remove o
     await form.getByRole("button", { name: "Add key" }).click();
   };
   await add("Ayesha", "sk-e2e-secret-123456");
-  await expect(page.getByText("Ayesha's key works (2 models)")).toBeVisible();
+  // Testing the key also picks its best model, shown in the toast and on the key.
+  await expect(page.getByText("Ayesha's key works (4 models). Best model: fake-model, used automatically.")).toBeVisible();
   const list = page.getByTestId("keys-list");
   await expect(list).toContainText("Ayesha");
   await expect(list).toContainText("••••3456");
+  await expect(list.locator("li", { hasText: "Ayesha" })).toContainText("best model: fake-model");
   await expect(form.getByLabel("API key")).toHaveValue("");
 
   await add("Bilal", "bad-key-000000");
@@ -84,6 +86,18 @@ test("Questions: a batch an agent wrote in another shape shows its options and c
   expect(String(h.project.svc.question("Q-9001")!.answer)).toContain("A: Ledger: calm and precise.");
 });
 
+test("Usage-limit wait: the header and Needs you say until when, and Try now retries", async ({ page }) => {
+  h = await startHarness(DEFAULT_BUILD_SCENARIO);
+  h.project.svc.patchState({ limitedUntil: Date.now() + 3_600_000 });
+  await openDashboard(page, h, "needs");
+  const pill = page.getByTestId("limit-wait");
+  await expect(pill).toContainText("waiting for usage limits until");
+  await expect(page.getByText(/Agents are waiting for usage limits to reset/)).toBeVisible();
+  await pill.getByRole("button", { name: "Try now" }).click();
+  await expect(pill).toHaveCount(0);
+  expect(h.project.svc.state.limitedUntil).toBeNull();
+});
+
 test("Settings: switch to the built-in engine and pick models from the providers' live lists", async ({ page }) => {
   h = await startHarness(DEFAULT_BUILD_SCENARIO);
   llm = await startFakeLlm({ scenarioFile: process.env.ASF_FAKE_SCENARIO!, stateDir: h.stateDir });
@@ -92,12 +106,26 @@ test("Settings: switch to the built-in engine and pick models from the providers
 
   await page.getByRole("radio", { name: /Built-in engine/ }).check();
   await expect(page.getByTestId("engine-key-count")).toContainText("1 working key");
+  // The key's best model is picked without any setup, and used while the lists are empty.
+  await expect(page.getByTestId("engine-auto")).toBeChecked();
+  await expect(page.getByTestId("engine-auto-picks")).toContainText(`${key.id}:fake-model`);
+  await expect(page.getByTestId("engine-auto-picks")).toContainText("Your lists are empty, so the automatic choice is used for every run");
+  // Light work goes to the small model first, complex work to the most capable.
+  await expect(page.getByTestId("route-light")).toContainText(`${key.id}:fake-mini-8b`);
+  await expect(page.getByTestId("route-heavy").locator("span.mono").first()).toHaveText(`${key.id}:fake-model`);
   const strong = page.getByTestId("chain-strong");
   await strong.getByLabel("Add a model").fill(`${key.id}:fake-model`);
   await strong.getByRole("button", { name: "Add", exact: true }).click();
   const fast = page.getByTestId("chain-fast");
   await fast.getByLabel("Add a model").fill(`${key.id}:fake-fast`);
   await fast.getByLabel("Add a model").press("Enter");
+  // A model its provider does not offer (a paid or retired one) is flagged before it fails every run.
+  await expect(page.getByTestId("model-not-free")).toHaveCount(0);
+  await strong.getByLabel("Add a model").fill(`${key.id}:paid-model-405b`);
+  await strong.getByLabel("Add a model").press("Enter");
+  await expect(strong.getByTestId("model-not-free")).toHaveCount(1);
+  await strong.getByRole("button", { name: `Remove ${key.id}:paid-model-405b` }).click();
+  await expect(page.getByTestId("model-not-free")).toHaveCount(0);
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByText("Settings saved")).toBeVisible();
   expect(h.project.svc.settings).toMatchObject({ engine: "builtin", engine_models: { strong: [`${key.id}:fake-model`], fast: [`${key.id}:fake-fast`] } });

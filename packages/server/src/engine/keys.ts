@@ -23,7 +23,10 @@ export interface KeyView {
   baseUrl: string;
   addedAt: string;
   invalid: string | null;
+  /** The whole key is at its limit until then. */
   cooldownUntil: number | null;
+  /** Models of this key at their own limit right now (the key's other models still work). */
+  modelsLimited: number;
   usageToday: { requests: number; input: number; output: number };
 }
 
@@ -84,7 +87,9 @@ export class KeyStore {
     if (!preset && input.provider !== "custom") throw new Error(`Unknown provider "${input.provider}".`);
     const baseUrl = (input.baseUrl ?? "").trim() || undefined;
     if (input.provider === "custom" && !baseUrl) throw new Error("A custom provider needs its base URL (ending in /v1 for most).");
-    if (!preset?.keyless && !input.key.trim()) throw new Error("The key is empty.");
+    if (preset?.needsBaseUrl && (!baseUrl || /[{}]/.test(baseUrl)))
+      throw new Error(`${preset.label} needs its base URL with your own part filled in (replace the {…} part of ${preset.baseUrl}).`);
+    if (!preset?.keyless && !preset?.keyOptional && !input.key.trim()) throw new Error("The key is empty.");
     const k: StoredKey = {
       id: `k_${crypto.randomBytes(4).toString("hex")}`,
       provider: input.provider,
@@ -111,8 +116,15 @@ export class KeyStore {
     this.save(this.list().map((k) => (k.id === id ? { ...k, invalid: reason } : k)));
   }
 
-  cooldown(id: string, until: number): void {
-    this.state[id] = { ...this.state[id], cooldownUntil: until };
+  /** A rate limit: for one model of the key when `model` is given, otherwise for the whole key. */
+  cooldown(id: string, until: number, model?: string): void {
+    const s = this.state[id] ?? {};
+    this.state[id] = model ? { ...s, models: { ...s.models, [model]: until } } : { ...s, cooldownUntil: until };
+  }
+
+  /** Forget every cooldown (the owner retries, or keys changed). */
+  clearCooldowns(): void {
+    for (const id of Object.keys(this.state)) this.state[id] = { ...this.state[id], cooldownUntil: 0, models: {} };
   }
 
   touch(id: string): void {
@@ -163,6 +175,7 @@ export class KeyStore {
       addedAt: k.addedAt,
       invalid: k.invalid ?? null,
       cooldownUntil: (this.state[k.id]?.cooldownUntil ?? 0) > now ? this.state[k.id]!.cooldownUntil! : null,
+      modelsLimited: Object.values(this.state[k.id]?.models ?? {}).filter((t) => t > now).length,
       usageToday: usage[k.id] ?? { requests: 0, input: 0, output: 0 },
     }));
   }

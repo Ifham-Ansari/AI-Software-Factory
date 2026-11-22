@@ -47,7 +47,11 @@ export async function keysCommand(p: Parsed): Promise<number> {
     return 0;
   }
   if (sub === "providers") {
-    for (const pr of PROVIDERS) console.log(`${pr.id.padEnd(11)} ${pr.label.padEnd(28)} ${pr.keyUrl ?? (pr.keyless ? "no key needed" : "")}\n            ${pr.note}`);
+    for (const pr of PROVIDERS) {
+      const tier = pr.tier === "trial" ? "[trial credit]" : pr.tier === "local" ? "[this computer]" : "[free]";
+      console.log(`${pr.id.padEnd(13)} ${pr.label.padEnd(32)} ${tier.padEnd(16)} ${pr.keyUrl ?? (pr.keyless ? "no key needed" : "")}\n              ${pr.note}`);
+      if (pr.needsBaseUrl) console.log(`              Add with --base-url ${pr.baseUrl} (fill in the {…} part).`);
+    }
     return 0;
   }
   if (sub === "add") {
@@ -60,8 +64,10 @@ export async function keysCommand(p: Parsed): Promise<number> {
     let key = flag(p, "key") ?? "";
     if (!key && !preset.keyless) {
       if (preset.keyUrl) console.log(`Create a key at ${preset.keyUrl}`);
-      key = await readSecret(`Paste the ${preset.label} key for ${label}: `);
+      key = await readSecret(`Paste the ${preset.label} key for ${label}${preset.keyOptional ? " (or press Enter to use it without a key)" : ""}: `);
     }
+    if (preset.needsBaseUrl && !flag(p, "base-url"))
+      throw new CliError(`${preset.label} needs --base-url ${preset.baseUrl} with the {…} part filled in (for example your account id).`, 2);
     try {
       const k = store.add({ provider, label, key, baseUrl: flag(p, "base-url") });
       console.log(`Added ${k.id} (${provider}, ${label}). Test it with: asf keys test ${k.id}`);
