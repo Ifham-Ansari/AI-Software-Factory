@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { fmtAgo } from "../lib/format";
-import { noteStore, prefs, targetHash, useNotes, type NoteEvent } from "../lib/notify";
+import { isUnread, noteStore, prefs, targetHash, useNotes, type NoteEvent } from "../lib/notify";
 import { useDocs, useProject, useQuestions } from "../lib/queries";
 import { navigate } from "../lib/router";
 import type { Notify } from "../lib/types";
 import { Icon } from "./ui";
 
-const LEVEL: Record<Notify["level"], { color: string; label: string }> = {
+export const LEVEL: Record<Notify["level"], { color: string; label: string }> = {
   action: { color: "var(--accent)", label: "needs you" },
   warning: { color: "var(--danger)", label: "warning" },
   success: { color: "var(--ok)", label: "done" },
@@ -46,9 +46,9 @@ function openNeeds(notes: NoteEvent[], unresolved: (ev: NoteEvent) => boolean): 
 
 /** Unread action notifications that are still open (drives the tab title). */
 export function useUnreadActions(pid: string): number {
-  const { notes, lastSeen } = useNotes(pid);
+  const s = useNotes(pid);
   const open = useUnresolved(pid);
-  return openNeeds(notes, open).filter((n) => n.id > lastSeen).length;
+  return openNeeds(s.notes, open).filter((n) => isUnread(s, n)).length;
 }
 
 export function NotificationToasts({ pid }: { pid: string }) {
@@ -79,6 +79,7 @@ export function NotificationToasts({ pid }: { pid: string }) {
               className="min-w-0 flex-1 px-3 py-2.5 text-left"
               onClick={() => {
                 noteStore(pid).dismiss(key);
+                noteStore(pid).markRead([ev.id]);
                 navigate(targetHash(pid, n));
               }}
             >
@@ -127,7 +128,8 @@ function Toggle({
 }
 
 export function Bell({ pid }: { pid: string }) {
-  const { notes, lastSeen } = useNotes(pid);
+  const snap = useNotes(pid);
+  const { notes } = snap;
   const [open, setOpen] = useState(false);
   const [desktop, setDesktop] = useState(prefs.desktop());
   const [sound, setSound] = useState(prefs.sound());
@@ -136,7 +138,7 @@ export function Bell({ pid }: { pid: string }) {
   );
   const box = useRef<HTMLDivElement>(null);
   const unresolved = useUnresolved(pid);
-  const unread = notes.filter((n) => n.id > lastSeen).length;
+  const unread = notes.filter((n) => isUnread(snap, n)).length;
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -155,9 +157,10 @@ export function Bell({ pid }: { pid: string }) {
 
   const needs = openNeeds(notes, unresolved).reverse();
   const recent = [...notes].reverse().slice(0, 60);
-  const go = (n: Notify) => {
+  const go = (ev: NoteEvent) => {
     setOpen(false);
-    navigate(targetHash(pid, n));
+    noteStore(pid).markRead([ev.id]);
+    navigate(targetHash(pid, ev.data.notify));
   };
   const item = (ev: NoteEvent) => {
     const n = ev.data.notify;
@@ -165,8 +168,8 @@ export function Bell({ pid }: { pid: string }) {
     return (
       <li key={ev.id}>
         <button
-          className={`flex w-full gap-2.5 px-4 py-2 text-left hover:bg-sunken ${ev.id > lastSeen ? "bg-highlight/40" : ""}`}
-          onClick={() => go(n)}
+          className={`flex w-full gap-2.5 px-4 py-2 text-left hover:bg-sunken ${isUnread(snap, ev) ? "bg-highlight/40" : ""}`}
+          onClick={() => go(ev)}
           data-testid="notify-item"
         >
           <span

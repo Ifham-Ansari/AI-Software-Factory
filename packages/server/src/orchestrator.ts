@@ -436,7 +436,8 @@ export class Orchestrator {
     const sessionId = o.resumeSession ?? crypto.randomUUID();
     const skills = this.p.roles.roles[o.role]?.skills ?? ["team-protocol"];
     const systemFile = path.join(dir, "system.md");
-    const sys = { roleTitle: roleTitle(this.p.roles, o.role), project: this.p.paths.name, skills, skillsDir: this.p.skillsDir(), direct: this.p.direct };
+    // Only this run's mode of each skill: the others would be resent with every request for nothing.
+    const sys = { roleTitle: roleTitle(this.p.roles, o.role), project: this.p.paths.name, skills, skillsDir: this.p.skillsDir(), direct: this.p.direct, mode: o.mode };
     fs.writeFileSync(systemFile, buildSystemPrompt(sys));
     // The built-in engine sends this instead when a model's per-request limit is smaller than the skills.
     const leanSystemFile = path.join(dir, "system-lean.md");

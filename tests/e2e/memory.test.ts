@@ -77,5 +77,10 @@ describe("learning memory and the needs-you inbox (fake claude, direct mode)", (
     expect(items.find((i: any) => i.kind === "alert")).toMatchObject({ title: "Something to look at", action: "dismiss" });
     // Questions come before blocked tasks and alerts.
     expect(items.map((i: any) => i.kind).indexOf("question")).toBeLessThan(items.map((i: any) => i.kind).indexOf("alert"));
+    // A blocked task is one notification: an alert raised for it adds details to the list, not a second one.
+    h.project.svc.alert("T002 is blocked after 3 failed runs: run failed. Check the agent log.", "T002");
+    const titles = (await h.api("GET", "/notifications")).map((n: any) => n.data.notify.title);
+    expect(titles.filter((t: string) => t.includes("T002"))).toEqual(["T002 is blocked"]);
+    expect(titles).toContain("Something to look at");
   }, 120_000);
 });

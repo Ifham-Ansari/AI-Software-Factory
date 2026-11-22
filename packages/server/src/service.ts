@@ -100,6 +100,19 @@ const GATE_DOCS: Record<string, string> = {
   release: "the release",
 };
 
+/**
+ * An alert's notification: its first sentence as the title ("Usage limit reached"), the rest as the body, so the
+ * owner sees what happened without opening it. A first sentence too long for a title keeps a generic one.
+ */
+export function alertNote(text: string): { title: string; body?: string } {
+  const t = text.trim();
+  const m = /^(.+?)[.!?](?:\s+|$)/.exec(t);
+  const first = (m ? m[1]! : t).trim();
+  if (!first || first.length > 100) return { title: "AI Software Factory needs your attention", body: t };
+  const rest = m ? t.slice(m[0].length).trim() : "";
+  return rest ? { title: first, body: rest } : { title: first };
+}
+
 export function notificationFor(type: string, summary: string, data: Record<string, any>, meta: EventMeta): Notification | null {
   const task = meta.task ?? null;
   switch (type) {
@@ -132,9 +145,11 @@ export function notificationFor(type: string, summary: string, data: Record<stri
     case "qa.fail":
       return { level: "warning", title: `QA failed ${task}`, body: summary, screen: "board", task };
     // Failed checks, merge conflicts, usage limits, and stuck tasks all raise an alert with the details: one
-    // notification each, not two.
+    // notification each, not two. A task that was just blocked has already been announced ("T001 is blocked"),
+    // so its alert only adds the details to Questions & alerts.
     case "alert.raised":
-      return { level: "warning", title: "AI Software Factory needs your attention", body: summary, screen: "questions", task };
+      if (data.taskBlocked) return null;
+      return { level: "warning", ...alertNote(summary), screen: "questions", task };
     case "quota.resumed":
       return { level: "info", title: "Usage limit reset", body: "Agents are working again.", screen: "agents" };
     case "phase.changed":
@@ -298,7 +313,9 @@ export class ProjectService {
     const alerts = this.state.alerts ?? [];
     const a = { id: (alerts.at(-1)?.id ?? 0) + 1, ts: new Date().toISOString(), text, task: task ?? null };
     this.patchState({ alerts: [...alerts.slice(-49), a] });
-    this.emit("alert.raised", text, { alert: a }, { task });
+    // Raised right after blocking the task: the block was the notification (see notificationFor).
+    const taskBlocked = Boolean(task && this.task(task)?.status === "blocked");
+    this.emit("alert.raised", text, taskBlocked ? { alert: a, taskBlocked } : { alert: a }, { task });
   }
 
   dismissAlert(id: number): void {

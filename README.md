@@ -192,7 +192,7 @@ For a small change, type it on the Idea screen and leave the process on **Auto**
    * **Agents** shows the team at work: each agent's status in plain words, its plan as a checklist with a progress bar, the files it touched, and its task's stage. Open **Details** on a card for the full live transcript: reasoning, each edit, each command and its output.
    * On the **Live board**, tasks move from *To do* to *Done*.
    * The **Team feed** shows agents messaging each other, reviews, and blocked actions.
-   * Notifications pop up when an agent asks you something, a document needs your approval, a task is blocked, or a task is done. You can turn on desktop notifications from the bell.
+   * Notifications pop up when an agent asks you something, a document needs your approval, a task is blocked, or a task is done. The screen each one belongs to is highlighted in the sidebar until you open it, and opening a notification marks it read. You can turn on desktop notifications from the bell.
    * **Changed your mind?** Click **Request a change** in the header any time after the PRD is approved. The PM updates the PRD and the tech lead updates the plan, each for your approval, and new tasks join the build. Finished work is kept unless your change says otherwise.
 9. **Release.** QA runs the full suite on the finished project, and AI Software Factory writes a release summary for you to approve. Everything is already in your folder.
 

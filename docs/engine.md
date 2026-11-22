@@ -91,7 +91,9 @@ Keys are stored only on that computer, in `~/.asf/keys.json`, shared by all its 
 
 Free tiers limit **requests per day** and **tokens per minute**. Every agent turn is one request, and every request resends the agent's instructions plus recent work. AI Software Factory keeps this small:
 
+* an agent gets only the part of its skills for the run it is doing: a plan run carries the Tech Lead's plan instructions, not its seven other modes (10% to 30% fewer tokens per request for planning, design, product, and QA runs);
 * tool output is capped and long files are read in pages;
+* old tool output is shortened on every request: the latest six results stay whole, older ones keep their first line (the agent runs the tool again if it needs more). This is done four results at a time, so the start of each request repeats and providers that cache it can reuse it. On real runs, this and the line above cut the tokens of long runs by a quarter to a third;
 * once a file is written, its content is not sent again: the step keeps a pointer ("36,340 characters written to `home.html`; Read it to see them"), since the file is on disk;
 * older steps are trimmed so that each request stays under **Size of each request** (Settings; lower it when a provider's per-minute limit is small), and the agent is told what the removed steps did, so it does not redo them;
 * **Turns per run** (Settings, default 50) stops a confused agent before it uses your whole day;

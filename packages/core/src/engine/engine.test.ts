@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { guardDecision } from "../guard.ts";
-import { compactMessages, estimateTokens, progressSummary, shrinkToolCall, type ChatMessage } from "./compact.ts";
+import { compactMessages, estimateTokens, progressSummary, shrinkToolCall, trimStale, type ChatMessage } from "./compact.ts";
 import { classifyProviderError, parseDurationMs, rateLimitResetAt, reportedTokenLimit } from "./errors.ts";
 import { pickKey, type PoolKey } from "./pool.ts";
 import { maskKey, parseModelRef } from "./providers.ts";
@@ -167,6 +167,41 @@ describe("compaction", () => {
     expect(note).toContain("asf commands you already ran: asf doc submit design.");
     expect(note).toContain("- [x] Home page\n- [ ] Booking page");
     expect(note).toContain("Do not redo finished work");
+  });
+
+  it("old tool output is shortened on every request; the latest results stay whole", () => {
+    const m: ChatMessage[] = [
+      { role: "user", content: "task" },
+      ...call(1, "Read", { file_path: "C:/asf/skills/team-protocol/SKILL.md" }, "rules ".repeat(1000)),
+      ...call(2, "Write", { file_path: "src/app.ts", content: "code;".repeat(400) }, "Wrote src/app.ts."),
+      ...Array.from({ length: 8 }, (_, i) => step(i, 3000)).flat(),
+    ];
+    // 10 results: the 6 latest stay whole; the 4 older ones that are long keep only their first line.
+    const out = trimStale(m);
+    const tools = out.filter((x) => x.role === "tool").map((x) => x.content);
+    expect(tools[2]).toBe(`${"x".repeat(120)}\n(3000 characters; trimmed to save tokens. Run the tool again if you need them.)`);
+    // Short results ("Wrote src/app.ts.") are kept, and the latest six are whole.
+    expect(tools[1]).toBe("Wrote src/app.ts.");
+    expect(tools.slice(-6).every((t) => t.length === 3000)).toBe(true);
+    // With the full instructions, reading a skill again is trimmed (the skills are in the system prompt) ...
+    expect(tools[0]).toMatch(/^rules rules .*\n\(6000 characters; trimmed/);
+    // ... with the short instructions, the latest read of each SKILL.md is the agent's instructions and stays.
+    expect(trimStale(m, { keepSkillReads: true }).filter((x) => x.role === "tool")[0]!.content).toBe("rules ".repeat(1000));
+    // A call that already ran loses its written content (it is on disk).
+    expect(argsOf(out)[1]!.content).toMatch(/^\(2000 characters, already written to src\/app\.ts/);
+    expect(estimateTokens(out)).toBeLessThan(estimateTokens(m) * 0.7);
+    // The stored conversation is not changed, and a short one is left alone.
+    expect(argsOf(m)[1]!.content).toHaveLength(2000);
+    const short = m.slice(0, 19); // 9 results
+    expect(trimStale(short)).toBe(short);
+  });
+
+  it("shortens in groups, so the start of the conversation repeats from one request to the next", () => {
+    const run = (n: number) => trimStale([{ role: "user", content: "task" }, ...Array.from({ length: n }, (_, i) => step(i, 3000)).flat()]);
+    const trimmed = (out: ChatMessage[]) => out.filter((x) => x.role === "tool" && /trimmed/.test(x.content)).length;
+    expect([6, 9, 10, 11, 13, 14].map((n) => trimmed(run(n)))).toEqual([0, 0, 4, 4, 4, 8]);
+    // Requests 10 to 13 share the same start, which providers can cache.
+    expect(JSON.stringify(run(13).slice(0, 21))).toBe(JSON.stringify(run(10).slice(0, 21)));
   });
 });
 

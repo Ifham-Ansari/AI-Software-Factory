@@ -69,19 +69,55 @@ function beep(): void {
   }
 }
 
+/** What decides whether a notification is unread: everything up to "mark all read", plus the ones opened since. */
+export interface ReadState {
+  lastSeen: number;
+  read: ReadonlySet<number>;
+}
+
+export function isUnread(s: ReadState, ev: { id: number }): boolean {
+  return ev.id > s.lastSeen && !s.read.has(ev.id);
+}
+
+/** The screen a notification belongs to (and opens). */
+export function noteScreen(n: Notify): string {
+  return n.screen || "questions";
+}
+
+const LEVEL_RANK: Record<Notify["level"], number> = { action: 3, warning: 2, success: 1, info: 0 };
+
+/** Unread notifications per screen, with the most important level among them (for the nav highlights). */
+export function unreadByScreen(s: ReadState & { notes: NoteEvent[] }): Map<string, { count: number; level: Notify["level"] }> {
+  const out = new Map<string, { count: number; level: Notify["level"] }>();
+  for (const ev of s.notes) {
+    if (!isUnread(s, ev)) continue;
+    const n = ev.data.notify;
+    const cur = out.get(noteScreen(n));
+    if (!cur) out.set(noteScreen(n), { count: 1, level: n.level });
+    else {
+      cur.count++;
+      if (LEVEL_RANK[n.level] > LEVEL_RANK[cur.level]) cur.level = n.level;
+    }
+  }
+  return out;
+}
+
 export class NoteStore {
   readonly pid: string;
   notes: NoteEvent[] = [];
   toasts: Toast[] = [];
   lastSeen: number;
+  /** Notifications read one at a time (opened, or their screen visited) after `lastSeen`. */
+  read: Set<number>;
   private toastKey = 0;
   private listeners = new Set<() => void>();
-  private snap: { notes: NoteEvent[]; toasts: Toast[]; lastSeen: number };
+  private snap: { notes: NoteEvent[]; toasts: Toast[]; lastSeen: number; read: ReadonlySet<number> };
 
   constructor(pid: string) {
     this.pid = pid;
     this.lastSeen = Number(lsGet(`asf.notify.seen.${pid}`) ?? 0) || 0;
-    this.snap = { notes: this.notes, toasts: this.toasts, lastSeen: this.lastSeen };
+    this.read = new Set(readIds(lsGet(`asf.notify.read.${pid}`)).filter((id) => id > this.lastSeen));
+    this.snap = { notes: this.notes, toasts: this.toasts, lastSeen: this.lastSeen, read: this.read };
   }
 
   subscribe = (l: () => void) => {
@@ -90,8 +126,23 @@ export class NoteStore {
   };
   snapshot = () => this.snap;
   private emit() {
-    this.snap = { notes: this.notes, toasts: this.toasts, lastSeen: this.lastSeen };
+    this.snap = { notes: this.notes, toasts: this.toasts, lastSeen: this.lastSeen, read: this.read };
     for (const l of this.listeners) l();
+  }
+
+  /** Mark these notifications read (one was opened). */
+  markRead(ids: number[]): void {
+    const add = ids.filter((id) => isUnread(this, { id }));
+    if (!add.length) return;
+    // A new set, so React sees the change; ids at or below lastSeen are read anyway.
+    this.read = new Set([...[...this.read].filter((id) => id > this.lastSeen).slice(-500), ...add]);
+    lsSet(`asf.notify.read.${this.pid}`, JSON.stringify([...this.read]));
+    this.emit();
+  }
+
+  /** The owner is looking at this screen: its notifications are read. */
+  markScreenRead(screen: string): void {
+    this.markRead(this.notes.filter((n) => noteScreen(n.data.notify) === screen).map((n) => n.id));
   }
 
   /** Past notifications (HTTP backfill): listed in the bell, never toasted. */
@@ -146,8 +197,19 @@ export class NoteStore {
     const max = this.notes.at(-1)?.id ?? this.lastSeen;
     if (max === this.lastSeen) return;
     this.lastSeen = max;
+    this.read = new Set();
     lsSet(`asf.notify.seen.${this.pid}`, String(max));
+    lsSet(`asf.notify.read.${this.pid}`, "[]");
     this.emit();
+  }
+}
+
+function readIds(raw: string | null): number[] {
+  try {
+    const v: unknown = JSON.parse(raw ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is number => Number.isInteger(x)) : [];
+  } catch {
+    return [];
   }
 }
 

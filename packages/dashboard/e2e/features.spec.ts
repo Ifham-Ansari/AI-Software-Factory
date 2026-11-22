@@ -280,9 +280,17 @@ test("notifications: ask @human toasts, bell counts, click goes to Questions; do
   // Unread: "The build has started" (from seeding the build) and the question.
   await expect(page.getByTestId("bell-count")).toHaveText("2");
   await expect.poll(() => page.title()).toMatch(/^\(1\) AI Software Factory · /);
+  // The tabs these notifications belong to are highlighted until they are opened.
+  await expect(page.getByTestId("nav-new-questions")).toBeVisible();
+  await expect(page.getByTestId("nav-new-agents")).toBeVisible();
+  await expect(page.getByTestId("nav-new-board")).toHaveCount(0);
   await toast.click();
   await expect(page).toHaveURL(/#\/p\/[^/]+\/questions/);
   await expect(toast).toHaveCount(0);
+  // Opening it read it: the Questions highlight is gone, and only "The build has started" is unread.
+  await expect(page.getByTestId("nav-new-questions")).toHaveCount(0);
+  await expect(page.getByTestId("bell-count")).toHaveText("1");
+  await expect(page.getByTestId("nav-new-agents")).toBeVisible();
 
   // Bell panel: "Needs you" lists the open question; mark all read clears the count.
   await page.getByTestId("bell").click();
@@ -303,9 +311,11 @@ test("notifications: ask @human toasts, bell counts, click goes to Questions; do
     "data-level",
     "success",
   );
+  await expect(page.getByTestId("nav-new-board")).toBeVisible();
 
   // Direct workspace: the Diff tab lists files changed since the task started; no branch row.
   await goto(page, h, "board/T001");
+  await expect(page.getByTestId("nav-new-board")).toHaveCount(0);
   const drawer = page.getByTestId("task-drawer");
   await expect(drawer.getByText("branch", { exact: true })).toHaveCount(0);
   await drawer.getByRole("tab", { name: /Diff/ }).click();

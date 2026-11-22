@@ -4,13 +4,56 @@ import path from "node:path";
 import type { Row } from "@asf/core";
 import type { TaskRow } from "./service.ts";
 
-// Prompt assembly. system.md = an AI Software Factory header + the role's SKILL.md bodies (roles.yaml order). It is identical
-// for every run of a role (no agent id, task, or mode in it), so Claude Code's prompt cache is reused across
-// runs and agents. Everything run-specific goes in the run prompt (user message), which stays lean: who you
+// Prompt assembly. system.md = an AI Software Factory header + the role's SKILL.md bodies (roles.yaml order), with
+// only this run's `## Mode:` section of each skill. It is identical for every run of a role in a mode (no agent
+// id or task in it), so Claude Code's prompt cache is reused across runs and agents (builds are almost all
+// `implement` runs). Everything run-specific goes in the run prompt (user message), which stays lean: who you
 // are, the task file, a few unread messages, and pointers to files by path.
 
 export function stripFrontmatter(md: string): string {
   return md.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+}
+
+/** "## Mode: survey (existing codebases)" \u2192 "survey". */
+function modeOf(heading: string): string | null {
+  return /^## Mode:\s*([\w-]+)/.exec(heading)?.[1]?.toLowerCase() ?? null;
+}
+
+/** A skill split at its `## ` headings (not inside code fences); the text before the first one is part 0. */
+function sections(body: string): string[] {
+  const out: string[] = [""];
+  let fence = false;
+  for (const line of body.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    if (!fence && line.startsWith("## ")) out.push("");
+    out[out.length - 1] += `${line}\n`;
+  }
+  return out;
+}
+
+/**
+ * A role's skill describes each kind of run under a `## Mode: <name>` heading, and a run needs only its own:
+ * planning skills are mostly modes (the Tech Lead's 8 modes are 80% of its skill), and every request of a run
+ * resends the instructions. The other modes become one line. A skill without a section for this mode (an engineer's,
+ * or a mode it does not describe) is kept whole.
+ */
+export function focusMode(body: string, mode: string | undefined, file: string): string {
+  if (!mode) return body;
+  const parts = sections(body);
+  const names = parts.map((p) => modeOf(p));
+  if (!names.includes(mode.toLowerCase())) return body;
+  const others = names.filter((n): n is string => n !== null && n !== mode.toLowerCase());
+  let noted = false;
+  return parts
+    .map((p, i) => {
+      const n = names[i];
+      if (n === null || n === mode.toLowerCase()) return p;
+      if (noted) return "";
+      noted = true;
+      return `## Other modes\n\nThis run is \`${mode}\`. The other modes (${others.join(", ")}) are left out here; they are in \`${file}\`.\n\n`;
+    })
+    .join("")
+    .trim();
 }
 
 export function readSkill(skillsDir: string, name: string): string | null {
@@ -38,6 +81,8 @@ export interface SystemPromptInput {
   skillsDir: string;
   /** Direct mode: the team shares the project folder and AI Software Factory handles everything git used to do. */
   direct?: boolean;
+  /** The run's mode (plan, verify, …): only that `## Mode:` section of each skill is included. */
+  mode?: string;
 }
 
 const DIRECT_NOTE = [
@@ -68,9 +113,16 @@ export function buildSystemPrompt(i: SystemPromptInput): string {
     "",
     ...(i.direct ? [DIRECT_NOTE] : []),
   ].join("\n");
+  const dir = i.skillsDir.replace(/\\/g, "/");
   if (i.lean) {
-    const dir = i.skillsDir.replace(/\\/g, "/");
-    const list = i.skills.map((s) => `- \`${dir}/${s}/SKILL.md\`: ${skillDescription(i.skillsDir, s) || s}`).join("\n");
+    const mode = i.mode?.toLowerCase();
+    const list = i.skills
+      .map((s) => {
+        // Point at this run's section, so the agent reads that part of a long skill.
+        const own = mode && sections(readSkill(i.skillsDir, s) ?? "").some((p) => modeOf(p) === mode);
+        return `- \`${dir}/${s}/SKILL.md\`: ${skillDescription(i.skillsDir, s) || s}${own ? ` (this run: its \`## Mode: ${mode}\` section)` : ""}`;
+      })
+      .join("\n");
     return (
       header +
       "\n## Your skills (read them from these files)\n\n" +
@@ -82,7 +134,7 @@ export function buildSystemPrompt(i: SystemPromptInput): string {
   const bodies = i.skills
     .map((s) => {
       const body = readSkill(i.skillsDir, s);
-      return body ? `\n\n---\n\n<!-- skill: ${s} -->\n${body}` : `\n\n<!-- skill ${s} not found -->`;
+      return body ? `\n\n---\n\n<!-- skill: ${s} -->\n${focusMode(body, i.mode, `${dir}/${s}/SKILL.md`)}` : `\n\n<!-- skill ${s} not found -->`;
     })
     .join("");
   return header + bodies + "\n";

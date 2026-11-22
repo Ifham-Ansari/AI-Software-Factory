@@ -1,5 +1,6 @@
 import {
   compactMessages,
+  trimStale,
   ENGINE_NUDGE,
   ENGINE_PREAMBLE,
   ENGINE_TOOL_NAMES,
@@ -292,7 +293,8 @@ export class EngineRunner implements AgentRunner {
         baseUrl: this.opts.keys.baseUrl(key),
         apiKey: key.key,
         model: pick.model,
-        messages: [{ role: "system", content: useFull ? fullSystem : leanSystem }, ...compactMessages(history, budget - sysTokens)],
+        // Old tool output is shortened on every request (not only when it no longer fits): it is resent each turn.
+        messages: [{ role: "system", content: useFull ? fullSystem : leanSystem }, ...compactMessages(trimStale(history, { keepSkillReads: !useFull }), budget - sysTokens)],
         tools: ENGINE_TOOLS,
         signal: e.ac.signal,
         testHeaders,

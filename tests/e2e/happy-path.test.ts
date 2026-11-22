@@ -136,6 +136,12 @@ describe.each(["claude", "engine"] as const)("1. happy path through every phase 
     expect(svc.tasks({ kind: ["build"] }).every((t) => t.status === "todo")).toBe(true);
     await h.api("POST", "/gates/plan/approve", { team: { backend: 1, frontend: 1 } });
     expect(svc.phase).toBe("build");
+    // The plan run's instructions carried only the plan mode of the Tech Lead skill.
+    const planTask = svc.tasks({ kind: ["planning"] }).find((t) => t.mode === "plan")!;
+    const planSystem = fs.readFileSync(path.join(h.project.paths.runs, svc.runs({ task: planTask.id })[0]!.id, "system.md"), "utf8");
+    expect(planSystem).toContain("## Mode: plan");
+    expect(planSystem).not.toContain("## Mode: architect");
+    expect(planSystem).toMatch(/The other modes \([^)]*architect[^)]*\) are left out/);
 
     await waitFor(() => svc.doc("release")?.status === "submitted", "release summary", 150_000);
     expect(svc.phase).toBe("release_review");

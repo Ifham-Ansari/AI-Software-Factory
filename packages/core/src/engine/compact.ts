@@ -97,6 +97,67 @@ export function progressSummary(messages: ChatMessage[]): string | null {
   return lines.join("\n");
 }
 
+/** Tool results further back than this many are stale: shortened on every request, not only when one is too big. */
+export const STALE_AFTER = 6;
+/**
+ * Stale results are shortened this many at a time, so the start of the conversation stays the same for several
+ * requests in a row: providers that cache a repeated prompt start (Gemini, Groq, OpenRouter, DeepSeek, …) reuse it.
+ */
+export const STALE_CHUNK = 4;
+/** A stale result longer than this keeps only its first line (short ones, like "Wrote src/app.ts.", stay whole). */
+const STALE_MAX_CHARS = 300;
+
+/**
+ * The skill a call reads (the short instructions point the agent at its SKILL.md files), or null. References and
+ * templates are not instructions for the whole run: they are trimmed like any other file.
+ */
+function skillRead(call: ToolCallMsg | undefined): string | null {
+  if (!call || call.function.name !== "Read") return null;
+  const f = parseArgs(call)?.file_path;
+  return typeof f === "string" && /[\\/]skills[\\/][^\\/]+[\\/]SKILL\.md$/i.test(f) ? f.replace(/\\/g, "/") : null;
+}
+
+/**
+ * Every request resends the whole conversation, so a file read or a test run early in a run is paid for again on
+ * every later turn. Results older than the latest STALE_AFTER keep only their first line (the agent can run the
+ * tool again; files are on disk), and calls that already ran lose their big arguments (written content is on
+ * disk). With the short instructions (`keepSkillReads`), the latest read of each of the agent's SKILL.md files
+ * stays whole: it is the agent's instructions. With the full instructions the skills are in the system prompt
+ * already, so reading them again is trimmed like any other file. The history itself is not changed.
+ *
+ * This is the same trimming compactMessages does when a request no longer fits, done on every request, so a run
+ * does not send everything until it hits the limit and then almost nothing.
+ */
+export function trimStale(
+  messages: ChatMessage[],
+  opts: { keepSkillReads?: boolean; keep?: number; chunk?: number } = {},
+): ChatMessage[] {
+  const { keep = STALE_AFTER, chunk = STALE_CHUNK } = opts;
+  const toolIdx = messages.flatMap((m, i) => (m.role === "tool" ? [i] : []));
+  const stale = Math.floor(Math.max(0, toolIdx.length - keep) / chunk) * chunk;
+  if (stale === 0) return messages;
+  const last = toolIdx[stale - 1]!;
+  const calls = new Map<string, ToolCallMsg>();
+  for (const m of messages) if (m.role === "assistant") for (const c of m.tool_calls ?? []) calls.set(c.id, c);
+  // With the short instructions, the latest read of each skill is the agent's instructions for the rest of the run.
+  const latest = new Map<string, string>();
+  if (opts.keepSkillReads)
+    for (const m of messages) {
+      const f = m.role === "tool" ? skillRead(calls.get(m.tool_call_id)) : null;
+      if (f && m.role === "tool") latest.set(f, m.tool_call_id);
+    }
+  const instructions = new Set(latest.values());
+  return messages.map((m, i) => {
+    if (i > last) return m;
+    if (m.role === "tool" && m.content.length > STALE_MAX_CHARS && !instructions.has(m.tool_call_id)) {
+      const first = m.content.trimStart().split("\n", 1)[0]!.slice(0, 120);
+      return { ...m, content: `${first}\n(${m.content.length} characters; trimmed to save tokens. Run the tool again if you need them.)` };
+    }
+    if (m.role === "assistant" && m.tool_calls?.length) return { ...m, tool_calls: m.tool_calls.map(shrinkToolCall) };
+    return m;
+  });
+}
+
 /**
  * Shrink a conversation to about `maxTokens`, keeping the system prompt, the first user message (the task), the
  * latest user message, and the most recent steps. In order, until it fits: older tool results become a stub; the
