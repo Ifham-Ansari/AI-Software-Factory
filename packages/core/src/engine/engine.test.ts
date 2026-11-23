@@ -33,6 +33,10 @@ describe("provider errors", () => {
     const groq =
       '{"error":{"message":"Request too large for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 13419, please reduce your message size and try again."}}';
     expect(classifyProviderError(413, {}, groq)).toMatchObject({ kind: "context", limit: 8000 });
+    // Groq also sends it as a 429: still a request that cannot fit, not a limit to wait for.
+    expect(classifyProviderError(429, {}, groq)).toMatchObject({ kind: "context", limit: 8000 });
+    // A real per-minute limit stays a limit.
+    expect(classifyProviderError(429, {}, '{"error":{"message":"Rate limit reached for model `qwen/qwen3.8-27b` on tokens per minute (TPM): Limit 6000, Used 5800, Requested 900."}}').kind).toBe("limited");
     expect(reportedTokenLimit("This model's maximum context length is 8192 tokens.")).toBe(8192);
     expect(reportedTokenLimit("exceeds the context window of 32768 tokens")).toBe(32768);
     expect(reportedTokenLimit("prompt is too long")).toBeUndefined();
@@ -187,6 +191,17 @@ describe("compaction", () => {
     expect(tools[0]).toMatch(/^rules rules .*\n\(6000 characters; trimmed/);
     // ... with the short instructions, the latest read of each SKILL.md is the agent's instructions and stays.
     expect(trimStale(m, { keepSkillReads: true }).filter((x) => x.role === "tool")[0]!.content).toBe("rules ".repeat(1000));
+    // The project's documents are what a planning run works from: the latest read of each stays whole.
+    const prd = "FR-1 ".repeat(800);
+    const docs: ChatMessage[] = [
+      { role: "user", content: "plan" },
+      ...call(1, "Read", { file_path: ".asf/docs/prd.md" }, prd),
+      ...call(2, "Read", { file_path: "C:/app/.asf/docs/prd.md", offset: 1 }, prd),
+      ...Array.from({ length: 8 }, (_, i) => step(i, 3000)).flat(),
+    ];
+    const kept = trimStale(docs).filter((x) => x.role === "tool").map((x) => x.content);
+    expect(kept[0]).toMatch(/trimmed/);
+    expect(kept[1]).toBe(prd);
     // A call that already ran loses its written content (it is on disk).
     expect(argsOf(out)[1]!.content).toMatch(/^\(2000 characters, already written to src\/app\.ts/);
     expect(estimateTokens(out)).toBeLessThan(estimateTokens(m) * 0.7);

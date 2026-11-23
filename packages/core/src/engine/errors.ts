@@ -105,6 +105,9 @@ export function classifyProviderError(status: number, headers: Record<string, st
   if (status === 401 || status === 403) return { kind: "auth", message };
   // A paid model on a free account fails the same way every time: rule the model out instead of waiting.
   if (status === 402 || PAYMENT_RE.test(body)) return { kind: "fatal", message: `${message} (this model is not free on this account)` };
+  // Groq sends "Request too large … tokens per minute (TPM): Limit 6000, Requested 9105" as a 429 too: no wait
+  // makes that request fit (it once retried 429 times), so it is a size problem, not a rate limit.
+  if (status === 429 && /request too large/i.test(body)) return { kind: "context", limit: reportedTokenLimit(body), message };
   if (status === 429) return { kind: "limited", resetsAt: rateLimitResetAt(headers, body, now), message };
   if (status === 413 || CONTEXT_RE.test(body)) return { kind: "context", limit: reportedTokenLimit(body), message };
   // Some providers answer a used-up free quota with 400 plus a quota message.

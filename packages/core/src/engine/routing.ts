@@ -1,7 +1,8 @@
 import type { ModelClass } from "./models.ts";
 
 // Choosing a model by task, in plain code (no model call decides it). Each run gets a level from what it does:
-// sizing a request or answering a teammate is light, a small task is light, planning and architecture are heavy.
+// answering a teammate is light, a small task is light, sizing a request is standard (on the quick track it writes
+// the tasks themselves), planning and architecture are heavy.
 // Light runs go to small models first and heavy runs to the largest, so the strongest models' free limits are
 // kept for the work that needs them, and the small models' (usually much larger) limits carry the routine work.
 
@@ -20,8 +21,10 @@ export interface LevelInput {
   stakes?: string | null;
 }
 
-const LIGHT_MODES = new Set(["triage", "answer"]);
-const STANDARD_MODES = new Set(["discover", "survey"]);
+const LIGHT_MODES = new Set(["answer"]);
+// Triage writes the tasks itself on the quick track and must get them through the plan check: a small model got
+// lost there after one refusal.
+const STANDARD_MODES = new Set(["triage", "discover", "survey"]);
 /** Writing the product, the design, the architecture, or the plan, or untangling a failure: needs the strongest. */
 const HEAVY_MODES = new Set(["draft", "revise", "change", "direction", "system", "screens", "architect", "plan", "replan", "ruling", "integrate", "repair", "audit", "journey", "release", "scaffold"]);
 const ORDER: TaskLevel[] = ["light", "standard", "heavy"];
@@ -36,12 +39,13 @@ export function taskLevel(i: LevelInput): TaskLevel {
   if (LIGHT_MODES.has(i.mode)) level = "light";
   else if (STANDARD_MODES.has(i.mode)) level = "standard";
   else if (HEAVY_MODES.has(i.mode)) level = "heavy";
-  else if (i.mode === "review" || i.mode === "verify") level = size === "S" ? "light" : "standard";
+  // Reviews and checks need judgment: on small models a review of a one-page task looped for 40 turns.
+  else if (i.mode === "review" || i.mode === "verify") level = "standard";
   else level = size === "S" ? "light" : size === "L" ? "heavy" : "standard";
   // A task that failed before gets a stronger model; a fix after review is never left to the smallest.
   level = raise(level, Math.min(i.failures ?? 0, 2));
   if (i.stage === "fix" || i.mode === "fix") level = atLeast(level, "standard");
-  // Code for real users is not left to the smallest models (sizing a request still is light).
+  // Code for real users is not left to the smallest models (answering a teammate still is light).
   if (/customer|regulated/i.test(i.stakes ?? "") && ["implement", "fix", "review", "verify"].includes(i.mode)) level = atLeast(level, "standard");
   return level;
 }

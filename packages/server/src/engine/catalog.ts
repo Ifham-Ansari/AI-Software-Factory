@@ -67,7 +67,10 @@ export class ModelCatalog {
         // A rejected key is an error; a provider without a model list falls back to its known models.
         const fallback = (preset?.defaultModels ?? []).map((id) => ({ id }));
         const listed = r.ok ? r.models : [];
-        const ranked = rankModels(presetId, listed.length ? listed : fallback);
+        let ranked = rankModels(presetId, listed.length ? listed : fallback);
+        // Some providers list only their newest models (Z.ai lists its paid GLM-5 models, not the free GLM-4 Flash
+        // ones): when nothing listed is usable, use the models known to work. A wrong one is dropped on first use.
+        if (!ranked.length && listed.length) ranked = rankModels(presetId, fallback);
         const error = !r.ok && (r.error.kind === "auth" || !fallback.length) ? r.error.message : undefined;
         this.cache.set(g.provider, { at: Date.now(), preset: presetId, ranked, ...(error ? { error } : {}) });
       }),

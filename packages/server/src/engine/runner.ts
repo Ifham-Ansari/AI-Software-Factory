@@ -247,7 +247,7 @@ export class EngineRunner implements AgentRunner {
     let usedTool = false;
     let nudged = false;
     /** Calls that keep failing the same way, to tell the agent to change course. */
-    const repeats = new Map<string, { count: number; output: string }>();
+    const repeats = new Map<string, { count: number; output: string; ok: boolean }>();
     // Free tiers count requests per day: the engine's own cap stops a confused run early.
     const maxTurns = Math.min(spec.maxTurns, settings.engine_max_turns ?? spec.maxTurns);
 
@@ -415,23 +415,30 @@ export class EngineRunner implements AgentRunner {
   }
 
   /**
-   * The same call failing with the same message again and again: smaller models tend to repeat a failing command
-   * instead of fixing its cause (a plan submitted seven times with the same missing fields). From the third time,
-   * the result says so, which is usually enough to make the model read the message and change something.
+   * The same call with the same result again and again: smaller models tend to repeat a failing command instead of
+   * fixing its cause (a plan submitted seven times with the same missing fields), or a passing check instead of
+   * finishing. From the third time, the result says so, which is usually enough to make the model move on.
    */
-  private noteRepeats(repeats: Map<string, { count: number; output: string }>, c: Call, outcome: ToolOutcome): ToolOutcome {
+  private noteRepeats(repeats: Map<string, { count: number; output: string; ok: boolean }>, c: Call, outcome: ToolOutcome): ToolOutcome {
     const sig = `${c.name}:${JSON.stringify(c.input)}`;
-    if (outcome.ok) {
-      repeats.delete(sig);
-      return outcome;
-    }
     const prev = repeats.get(sig);
-    const count = prev && prev.output === outcome.output ? prev.count + 1 : 1;
-    repeats.set(sig, { count, output: outcome.output });
+    const count = prev && prev.ok === outcome.ok && prev.output === outcome.output ? prev.count + 1 : 1;
+    repeats.set(sig, { count, output: outcome.output, ok: outcome.ok });
     if (count < 3) return outcome;
+    if (outcome.ok)
+      // Smaller models also loop on calls that work: a page was done, but its check ran a dozen times instead of
+      // `asf task done`.
+      return {
+        ok: true,
+        output: `${outcome.output}
+
+(AI Software Factory: you have run this exact call ${count} times with the same result; running it again will not tell you anything new. Go on with the next step of your task. If your work is complete, finish it as your instructions say: for a build task, write your handoff and run \`asf task done\`.)`,
+      };
     return {
       ok: false,
-      output: `${outcome.output}\n\n(AI Software Factory: this exact call has now failed ${count} times with the same result. Running it again will not help. Read the message above, change what it points to (if it describes a format or names a template, open that and follow it), and only then try again.)`,
+      output: `${outcome.output}
+
+(AI Software Factory: this exact call has now failed ${count} times with the same result. Running it again will not help. Read the message above, change what it points to (if it describes a format or names a template, open that and follow it), and only then try again.)`,
     };
   }
 

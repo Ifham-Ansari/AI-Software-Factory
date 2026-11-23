@@ -87,7 +87,7 @@ export const PROVIDERS: ProviderPreset[] = [
     tier: "free",
     limitScope: "model",
     // Only the GLM-4.x Flash models are free; GLM-5.x Flash and the FlashX models need a balance.
-    freeModels: "^glm-4(\\.\\d+)?v?-flash$",
+    freeModels: "^glm-4(\\.\\d+)?v?-flash(-\\d{4,})?$",
     defaultModels: ["glm-4.7-flash", "glm-4.5-flash"],
     note: "The GLM-4.x Flash models are free with tool calling, one request at a time per model. Newer GLM models (5.x, FlashX) are paid.",
   },

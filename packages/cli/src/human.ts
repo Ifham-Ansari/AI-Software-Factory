@@ -5,7 +5,7 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { flag, type Parsed } from "./args.ts";
-import { CliError, connect, findProjectRoot, projectIdFor, readServerInfo, request } from "./client.ts";
+import { CliError, connect, projectIdFor, projectRootForUp, readServerInfo, request } from "./client.ts";
 
 // Owner commands: init, doctor, up, status, pause, resume, stop, logs.
 
@@ -205,7 +205,7 @@ async function routeFor(dir: string, root: string | null): Promise<string> {
 
 async function up(p: Parsed): Promise<number> {
   const cwd = path.resolve(p.positional[1] ?? ".");
-  const root = findProjectRoot(cwd);
+  const root = projectRootForUp(cwd);
   let existing = readServerInfo();
   if (existing && (await alive(existing.url)) && !(await restartIfOutdated(existing))) existing = null;
   if (existing && (await alive(existing.url))) {

@@ -179,6 +179,22 @@ describe("built-in engine (fake llm)", () => {
     expect(streamOf(impl.id).match(/this exact call has now failed \d times with the same result/g)).toEqual(["this exact call has now failed 3 times with the same result"]);
   });
 
+  it("a call repeated with the same successful result gets told to move on", async () => {
+    h = await startHarness(
+      {
+        ...DEFAULT_BUILD_SCENARIO,
+        "backend:implement": {
+          steps: [{ asf: ["task", "start", "${ASF_TASK}"] }, ...Array.from({ length: 3 }, () => ({ bash: "echo checked" })), ...implementSteps().slice(2)],
+        },
+      },
+      { runner: "engine", workspace: "direct" },
+    );
+    await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
+    await waitFor(done("T001"), "T001 done");
+    const impl = h.project.svc.runs({ task: "T001" }).find((r) => r.stage === "implement")!;
+    expect(streamOf(impl.id).match(/you have run this exact call \d times with the same result/g)).toEqual(["you have run this exact call 3 times with the same result"]);
+  });
+
   it("a model with a small per-request limit gets the short instructions and still does the work", async () => {
     h = await startHarness(DEFAULT_BUILD_SCENARIO, { runner: "engine", workspace: "direct", keys: ["small-key"] });
     await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });

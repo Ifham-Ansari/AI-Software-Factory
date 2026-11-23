@@ -108,22 +108,28 @@ export const STALE_CHUNK = 4;
 const STALE_MAX_CHARS = 300;
 
 /**
- * The skill a call reads (the short instructions point the agent at its SKILL.md files), or null. References and
- * templates are not instructions for the whole run: they are trimmed like any other file.
+ * A file read whose latest copy stays whole, or null: the project's documents (`.asf/docs/`: the PRD, the
+ * architecture, contracts), which planning runs work from all along (trimmed, an agent re-read its PRD seven
+ * times in one run), and with the short instructions the agent's SKILL.md files. References, templates, and
+ * source files are trimmed like any other output.
  */
-function skillRead(call: ToolCallMsg | undefined): string | null {
+function keptRead(call: ToolCallMsg | undefined, skills: boolean): string | null {
   if (!call || call.function.name !== "Read") return null;
-  const f = parseArgs(call)?.file_path;
-  return typeof f === "string" && /[\\/]skills[\\/][^\\/]+[\\/]SKILL\.md$/i.test(f) ? f.replace(/\\/g, "/") : null;
+  const raw = parseArgs(call)?.file_path;
+  if (typeof raw !== "string") return null;
+  const f = raw.replace(/\\/g, "/");
+  if (/(^|\/)\.asf\/docs\//.test(f)) return f.replace(/^.*?\.asf\/docs\//, ".asf/docs/");
+  return skills && /\/skills\/[^/]+\/SKILL\.md$/i.test(f) ? f : null;
 }
 
 /**
  * Every request resends the whole conversation, so a file read or a test run early in a run is paid for again on
  * every later turn. Results older than the latest STALE_AFTER keep only their first line (the agent can run the
  * tool again; files are on disk), and calls that already ran lose their big arguments (written content is on
- * disk). With the short instructions (`keepSkillReads`), the latest read of each of the agent's SKILL.md files
- * stays whole: it is the agent's instructions. With the full instructions the skills are in the system prompt
- * already, so reading them again is trimmed like any other file. The history itself is not changed.
+ * disk). The latest read of each project document (`.asf/docs/`) stays whole, and with the short instructions
+ * (`keepSkillReads`) the latest read of each SKILL.md: they are what the agent works from. With the full
+ * instructions the skills are in the system prompt already, so reading them again is trimmed like any other file.
+ * The history itself is not changed.
  *
  * This is the same trimming compactMessages does when a request no longer fits, done on every request, so a run
  * does not send everything until it hits the limit and then almost nothing.
@@ -139,13 +145,12 @@ export function trimStale(
   const last = toolIdx[stale - 1]!;
   const calls = new Map<string, ToolCallMsg>();
   for (const m of messages) if (m.role === "assistant") for (const c of m.tool_calls ?? []) calls.set(c.id, c);
-  // With the short instructions, the latest read of each skill is the agent's instructions for the rest of the run.
+  // The latest read of each project document (and, with the short instructions, of each skill) stays whole.
   const latest = new Map<string, string>();
-  if (opts.keepSkillReads)
-    for (const m of messages) {
-      const f = m.role === "tool" ? skillRead(calls.get(m.tool_call_id)) : null;
-      if (f && m.role === "tool") latest.set(f, m.tool_call_id);
-    }
+  for (const m of messages) {
+    const f = m.role === "tool" ? keptRead(calls.get(m.tool_call_id), Boolean(opts.keepSkillReads)) : null;
+    if (f && m.role === "tool") latest.set(f, m.tool_call_id);
+  }
   const instructions = new Set(latest.values());
   return messages.map((m, i) => {
     if (i > last) return m;

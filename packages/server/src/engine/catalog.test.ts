@@ -62,6 +62,15 @@ describe("model catalog", () => {
     expect(catalog.autoRefs("light")[0]).toBe(ref("mid-model-70b"));
   });
 
+  it("uses the known free models when a provider lists only models that are not free (Z.ai lists GLM-5 only)", async () => {
+    models = [{ id: "glm-5.3-flash" }, { id: "glm-5.3-flashx" }, { id: "glm-5.2" }];
+    const keys = new KeyStore(dir);
+    keys.add({ provider: "zai", label: "Ayesha", key: "zai-key-123456", baseUrl: url });
+    const catalog = new ModelCatalog(keys);
+    await catalog.refresh();
+    expect(catalog.list()[0]).toMatchObject({ provider: "zai", models: ["glm-4.7-flash", "glm-4.5-flash"], best: "glm-4.7-flash" });
+  });
+
   it("reports a provider that cannot be reached and has no known models", async () => {
     const keys = new KeyStore(dir);
     keys.add({ provider: "custom", label: "Bilal", key: "custom-key-654321", baseUrl: url });

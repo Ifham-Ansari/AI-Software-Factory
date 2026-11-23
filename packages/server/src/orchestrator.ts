@@ -5,6 +5,7 @@ import {
   formatId,
   lessonsFor,
   matchesAny,
+  parseTaskFile,
   PHASE_GATE,
   quotaCheck,
   roleCap,
@@ -363,10 +364,16 @@ export class Orchestrator {
       extra.push(`Branch to merge: \`${t.meta.mergeBranch}\``);
     let handoff: string | null = null;
     let stat: string | null = null;
+    let diff: string | null = null;
     if (stage === "review" || stage === "verify") {
       handoff = this.svc.handoffs(t.id).at(-1)?.content ?? null;
-      if (this.p.direct) stat = this.taskDiff(t).stat;
-      else if (t.base_sha) stat = await diffStat(ws.cwd, t.base_sha);
+      if (this.p.direct) {
+        // No git in the project folder: the reviewer gets the task's changes here (ASF keeps snapshots), or it
+        // spends its run looking for them (a review once tried git diff for 40 turns).
+        const d = this.taskDiff(t);
+        stat = d.stat;
+        if (stage === "review" && d.diff.length <= 30_000) diff = d.diff;
+      } else if (t.base_sha) stat = await diffStat(ws.cwd, t.base_sha);
       if (stage === "verify") {
         const rv = this.svc.reviews(t.id).at(-1);
         if (rv?.summary) extra.push(`## Review verdict\n\n${rv.verdict}: ${rv.summary}`);
@@ -383,6 +390,7 @@ export class Orchestrator {
           extra,
           handoff,
           diffStat: stat,
+          diff,
           agent,
           roleTitle: roleTitle(this.p.roles, role),
           lessons: lessonsFor(this.svc.lessons(), role, [...t.owns, ...t.may_touch]).map((l) => l.text),
@@ -774,6 +782,8 @@ export class Orchestrator {
     if (!run.task) return;
     const t = this.svc.task(run.task);
     if (!t) return;
+    // Closed while it ran (superseded by the owner's decision, or cancelled): there is nothing to hand on.
+    if (t.status === "done" && t.hold === "cancelled") return;
     const ok = status === "success";
     try {
       if (t.kind === "planning") await this.afterPlanningRun(t, run, ok);
@@ -1082,16 +1092,58 @@ export class Orchestrator {
   /** Owner's "cancel current work": stop agents and close everything in flight, keeping finished work. */
   async cancelCurrentWork(): Promise<void> {
     await this.killAll();
+    const cancelled = new Set<string>();
     for (const t of this.svc.tasks()) {
       if (t.status === "done") continue;
       this.svc.setStatus(t.id, "done", { force: true, reason: "cancelled by the owner", extra: { hold: "cancelled" } });
+      cancelled.add(t.id);
     }
+    // Their task files go to .asf/tasks/cancelled/, so the next plan starts from a clean folder (the ids stay taken).
+    this.shelveTaskFiles(cancelled);
+    await this.commitIntegration("Cancelled the current work");
     for (const q of this.svc.questions("open")) this.svc.markAnswered(q.id, "(cancelled by the owner)", "human");
     const ch = this.activeChange();
     if (ch) this.setChange(ch.id, "cancelled");
     this.svc.patchState({ paused: false, pauseReason: null, track: null });
     this.svc.setPhase("idea");
     this.svc.emit("project.cancelled", "Owner cancelled the current work. Finished work is kept; send a new request when you are ready.", {}, { actor: "human" });
+  }
+
+  /**
+   * Close the planning tasks still working on a document the owner just approved, stopping their runs (a second
+   * revision once kept editing the approved plan's task files during the build). The task that submitted the
+   * approved version is left to finish: its output still has to be merged. The task is closed first, so the stopped
+   * run is not handled as a failure (see the run-end handler).
+   */
+  private async closeOpenPlanning(doc: string, version: number, why: string): Promise<void> {
+    const modes: Record<string, string[]> = { prd: ["draft", "revise", "change"], design: ["screens"], architecture: ["architect"], plan: ["plan", "replan"] };
+    for (const t of this.svc.tasks({ kind: ["planning"] })) {
+      // Only work still in progress: a task in "review" has finished and its document is being merged (cancelling
+      // it then lost the merge).
+      if (!["todo", "ready", "in_progress", "blocked"].includes(t.status) || !t.mode || !(modes[doc] ?? []).includes(t.mode)) continue;
+      if (t.meta.submitted?.doc === doc && t.meta.submitted.version === version) continue;
+      this.svc.setStatus(t.id, "done", { force: true, reason: why, extra: { hold: "cancelled" } });
+      const run = [...this.active.values()].find((r) => r.task === t.id);
+      if (run) await this.p.runner.kill(run.runId);
+    }
+  }
+
+  /** Move the task files of these tasks out of `.asf/tasks/` (into `cancelled/`, which plans do not read). */
+  private shelveTaskFiles(ids: Set<string>): void {
+    if (!ids.size) return;
+    const dir = path.join(this.p.sharedDir(), ".asf", "tasks");
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+    } catch {
+      return;
+    }
+    for (const f of files) {
+      const id = parseTaskFile(fs.readFileSync(path.join(dir, f), "utf8"), f).task?.id;
+      if (!id || !ids.has(id)) continue;
+      fs.mkdirSync(path.join(dir, "cancelled"), { recursive: true });
+      fs.renameSync(path.join(dir, f), path.join(dir, "cancelled", f));
+    }
   }
 
   private saveAttachments(dir: string, list: { name: string; data: string }[]): string[] {
@@ -1156,6 +1208,9 @@ export class Orchestrator {
     const doc = gate === "design_direction" ? null : gate;
     const d = doc ? this.svc.doc(doc) : null;
     if (doc && !d) throw new Error(`nothing submitted for ${gate} yet`);
+    // Nothing is left to do on an approved document: a revision still running would keep editing it (it once
+    // edited the approved plan's task files during the build).
+    if (doc) await this.closeOpenPlanning(doc, d!.version, `superseded: the owner approved ${doc} v${d!.version}`);
     if (doc) this.svc.setDocStatus(doc, "approved", comment, actor);
     this.svc.recordApproval(gate, doc, d?.version ?? null, "approved", comment);
     if (via === "change") {
@@ -1269,8 +1324,10 @@ export class Orchestrator {
           role: "tech-lead",
           status: "ready",
           priority: 0,
-          owns: [],
-          body: `The owner did not approve the release.\n\n${note}\n\nTriage: fix what is mechanical within this task, and create tasks for the owning roles for the rest (message the tech lead team).`,
+          // The fixes can be anywhere in the app: with no files of its own, this task could change nothing (it
+          // once asked itself for help instead).
+          owns: ["**"],
+          body: `The owner did not approve the release.\n\n${note}\n\nFix exactly what the owner asked, in the project's files (this task may change any of them). Keep the changes to what the comments need, check the result (run the project's checks, or open the pages), write your handoff, and finish with \`asf task done\`. The release is reviewed again after this.`,
           verify: this.svc.settings.checks.join(" && ") || "true",
         });
         break;
@@ -1841,18 +1898,19 @@ export class Orchestrator {
 
   async submitReleaseSummary(): Promise<void> {
     if (this.svc.doc("release")?.status === "submitted") return;
-    const tasks = this.svc.tasks({ kind: ["build", "integrate", "release"] });
-    const integ = this.p.sharedDir();
-    const log = this.p.direct
-      ? tasks.filter((x) => x.status === "done").map((x) => `${x.id} ${x.title}`).join("\n")
-      : (await git(integ, ["log", "--oneline", "-n", "40"], { reject: false })).stdout;
+    // Cancelled work was not built; the latest release QA round has the report that counts.
+    const tasks = this.svc.tasks({ kind: ["build", "integrate", "release"] }).filter((x) => x.status === "done" && x.hold !== "cancelled");
+    const log = this.p.direct ? null : (await git(this.p.sharedDir(), ["log", "--oneline", "-n", "40"], { reject: false })).stdout;
     const t1 = this.svc.handoffs("T001").at(-1)?.content ?? this.svc.handoffs("T000").at(-1)?.content ?? "";
-    const qa = this.svc.qaReports("REL-QA").at(-1)?.content ?? "";
+    const qa = tasks.filter((x) => x.kind === "release").map((x) => this.svc.qaReports(x.id).at(-1)?.content ?? "").filter(Boolean).at(-1) ?? "";
     const usage = this.svc.usage(30);
+    const built = tasks.filter((x) => x.kind === "build").length;
     const md = [
       `# Release summary: ${this.p.paths.name}`,
       "",
-      `AI Software Factory built ${tasks.filter((x) => x.kind === "build").length} tasks on the \`asf/integration\` branch. Approve to finish; then merge \`asf/integration\` into your main branch yourself when you are ready (AI Software Factory never does).`,
+      this.p.direct
+        ? `AI Software Factory built ${built} tasks, and everything is already in your project folder (${this.p.paths.root}). Approve to finish.`
+        : `AI Software Factory built ${built} tasks on the \`asf/integration\` branch. Approve to finish; then merge \`asf/integration\` into your main branch yourself when you are ready (AI Software Factory never does).`,
       "",
       "## What was built",
       "",
@@ -1868,12 +1926,7 @@ export class Orchestrator {
       "",
       qa || "(no report)",
       "",
-      "## Recent commits",
-      "",
-      "```",
-      log,
-      "```",
-      "",
+      ...(log ? ["## Recent commits", "", "```", log, "```", ""] : []),
       `## Usage\n\nBudget tokens used in the last 30 days: ${usage.byDay.reduce((a, d) => a + (d.tokens ?? 0), 0).toLocaleString()}.`,
     ].join("\n");
     this.svc.submitDoc("release", ".asf/docs/release.md", md, "orchestrator", null);

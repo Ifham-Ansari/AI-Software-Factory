@@ -771,9 +771,12 @@ export function registerApi(app: FastifyInstance, srv: AsfServer): void {
     wrap((req) => {
       human(req);
       const p = project(req);
-      const tasks = p.svc.tasks({ kind: ["build"] });
+      // Cancelled tasks are no longer part of the plan, and finished ones cost nothing more.
+      const tasks = p.svc.tasks({ kind: ["build"] }).filter((t) => t.hold !== "cancelled");
       const stats = tasks.length ? planStats(tasks) : null;
-      const est = estimateBuild(stats?.byRole ?? {}, p.svc.avgTokensByRole(), p.svc.settings.qa_per_task, p.svc.avgTurnsByRole());
+      const open: Record<string, number> = {};
+      for (const t of tasks) if (t.status !== "done") open[t.role] = (open[t.role] ?? 0) + 1;
+      const est = estimateBuild(open, p.svc.avgTokensByRole(), p.svc.settings.qa_per_task, p.svc.avgTurnsByRole());
       return { tasks: tasks.map(({ source: _s, body: _b, ...t }) => t), stats, estimate: est, team: p.svc.settings.team };
     }),
   );

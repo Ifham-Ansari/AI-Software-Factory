@@ -44,6 +44,7 @@ Architecture decision records, oldest first. Each one states the context, the de
 | [0014](decisions/0014-builtin-engine.md) | A built-in engine that runs agents on the team's own API keys |
 | [0015](decisions/0015-models-by-task.md) | Choosing models by task, from every free provider |
 | [0016](decisions/0016-fewer-tokens-per-request.md) | Fewer tokens per request, and notifications that point to their screen |
+| [0017](decisions/0017-fixes-from-a-real-run.md) | Fixes from a real run on free models |
 
 ## Project history
 

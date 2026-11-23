@@ -52,6 +52,10 @@ describe("picking a provider's best model", () => {
     expect(["openai/gpt-oss-120b", "nvidia/nemotron-3-ultra-550b-a55b:free", "Qwen3.5-397B-A17B", "mistral-large-latest", "moonshotai/kimi-k2-instruct", "command-a-03-2025"].map(cls)).toEqual(Array(6).fill("large"));
   });
 
+  it("leaves out models too small to drive an agent (under 7B)", () => {
+    expect(ids("openrouter", [{ id: "liquid/lfm-3-1.7b:free" }, { id: "meta/llama-3.2-3b:free" }, { id: "mistral/ministral-8b:free" }].map((m) => ({ ...m, tools: true, free: true })))).toEqual(["mistral/ministral-8b:free"]);
+  });
+
   it("reads mixture-of-experts sizes as the total, and prefers coding models", () => {
     expect(ids("custom", [{ id: "qwen3-235b-a22b" }, { id: "llama-3.1-70b" }])[0]).toBe("qwen3-235b-a22b");
     expect(ids("mistral", [{ id: "mistral-small-latest" }, { id: "codestral-latest" }])[0]).toBe("codestral-latest");

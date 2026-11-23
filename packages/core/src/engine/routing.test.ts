@@ -6,30 +6,32 @@ import { routeModels, taskLevel, type RoutableModel } from "./routing.ts";
 describe("how demanding a run is", () => {
   const level = (mode: string, extra: Partial<Parameters<typeof taskLevel>[0]> = {}) => taskLevel({ mode, stage: "implement", ...extra });
 
-  it("by mode: sizing and answers are light, discovery is standard, product, design, architecture, and plans are heavy", () => {
-    expect(["triage", "answer"].map((m) => level(m))).toEqual(["light", "light"]);
-    expect(["discover", "survey"].map((m) => level(m))).toEqual(["standard", "standard"]);
+  it("by mode: answers are light, sizing and discovery are standard, product, design, architecture, and plans are heavy", () => {
+    expect(level("answer")).toBe("light");
+    // Sizing a request writes the tasks itself on the quick track.
+    expect(["triage", "discover", "survey"].map((m) => level(m))).toEqual(["standard", "standard", "standard"]);
     expect(["draft", "screens", "architect", "plan", "integrate", "scaffold", "release"].map((m) => level(m))).toEqual(Array(7).fill("heavy"));
   });
 
   it("by task size for building and reviewing", () => {
     expect(["S", "M", "L"].map((size) => level("implement", { size }))).toEqual(["light", "standard", "heavy"]);
-    expect(["S", "M", "L"].map((size) => level("review", { size, stage: "review" }))).toEqual(["light", "standard", "standard"]);
+    // Reviews need judgment whatever the size.
+    expect(["S", "M", "L"].map((size) => level("review", { size, stage: "review" }))).toEqual(["standard", "standard", "standard"]);
     expect(level("implement", { size: null })).toBe("standard");
   });
 
   it("moves up after a failure, and a fix after review is never left to the smallest", () => {
     expect(level("implement", { size: "S", failures: 1 })).toBe("standard");
     expect(level("implement", { size: "S", failures: 5 })).toBe("heavy");
-    expect(level("triage", { failures: 1 })).toBe("standard");
+    expect(level("answer", { failures: 1 })).toBe("standard");
     expect(level("fix", { size: "S", stage: "fix" })).toBe("standard");
   });
 
   it("does not leave work for real users to the smallest models", () => {
     expect(level("implement", { size: "S", stakes: "customer-facing" })).toBe("standard");
     expect(level("implement", { size: "S", stakes: "hobby" })).toBe("light");
-    // Sizing a request stays light whatever the stakes.
-    expect(level("triage", { stakes: "regulated" })).toBe("light");
+    // Answering a teammate stays light whatever the stakes.
+    expect(level("answer", { stakes: "regulated" })).toBe("light");
   });
 });
 

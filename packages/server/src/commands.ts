@@ -97,6 +97,12 @@ export class Commands {
     if (!d.ok) throw new ServiceError(d.reason ?? "not allowed", 3);
   }
 
+  /** Remember which planning task submitted a document version (see the orchestrator's closeOpenPlanning). */
+  private noteSubmitted(id: Identity, doc: string, version: number): void {
+    const tid = this.runTask(id);
+    if (tid && this.svc.task(tid)?.kind === "planning") this.svc.patchMeta(tid, { submitted: { doc, version } });
+  }
+
   private actor(id: Identity): { agent: string; role: string | null } {
     return id.kind === "human" ? { agent: "human", role: null } : { agent: id.agent, role: id.role };
   }
@@ -327,6 +333,14 @@ export class Commands {
     this.must(id, "ask");
     this.checkAddress(to);
     if (to === "@team") throw new ServiceError("ask a specific role or @human, not @team", 2);
+    // Asking yourself only pauses your task until you answer yourself (a tech lead once did, when blocked).
+    const me = this.actor(id);
+    const sameRole = me.role ? this.svc.agents().filter((x) => x.role === me.role) : [];
+    if (to === `@${me.agent}` || (me.role && to === `@${me.role}` && sameRole.length <= 1))
+      throw new ServiceError(
+        `${to} is you. Decide it yourself (you have the authority for your role's questions), or ask @human if it is the owner's call. If something blocks you (the guard, a missing file), say so in your handoff or ask @human.`,
+        2,
+      );
     const taskId = this.runTask(id);
     const t = taskId ? this.svc.task(taskId) : null;
     if (batch) {
@@ -459,6 +473,7 @@ export class Commands {
     if (!content.trim()) throw new ServiceError(`${file ?? docPath(name)} is empty`, 2);
     const a = this.actor(id);
     const v = this.svc.submitDoc(name, file ?? docPath(name), content, a.agent, a.role ?? docOwners(name)?.[0] ?? null);
+    this.noteSubmitted(id, name, v);
     await this.p.orch.onDocSubmitted(name);
     return { text: `${name} v${v} submitted for approval`, data: { name, version: v } };
   }
@@ -469,6 +484,25 @@ export class Commands {
     this.must(id, "read");
     const repoFiles = await this.projectFiles();
     const r = checkPlan(files, repoFiles);
+    // Tasks that already ran are history (their files cannot change), so the rule about .asf/ paths is for new ones.
+    const ran = (tid: string) => (this.svc.task(tid)?.status ?? "todo") !== "todo";
+    r.problems = r.problems.filter((p) => !(p.code === "asf_path" && p.tasks.every(ran)));
+    // An id that a started or finished task already has cannot be reused for different work (the import would refuse
+    // it): say so now, with the next free id, instead of at submit.
+    const norm = (s: string | undefined) => (s ?? "").replace(/\r\n/g, "\n").trim();
+    const numbers = [...this.svc.tasks({ kind: ["build"] }).map((t) => t.id), ...r.tasks.map((t) => t.id)].map((x) => Number(/^T(\d+)$/.exec(x)?.[1] ?? -1));
+    let next = Math.max(0, ...numbers) + 1;
+    for (const t of r.tasks) {
+      const had = this.svc.task(t.id);
+      if (!had || had.kind !== "build" || had.status === "todo" || norm(had.source) === norm(t.source)) continue;
+      const free = `T${String(next++).padStart(3, "0")}`;
+      r.problems.push({
+        code: "id_taken",
+        tasks: [t.id],
+        message: `${t.id} is already the id of "${had.title}" (${had.hold === "cancelled" ? "cancelled" : had.status}), so it cannot be reused for different work. Give this task a new id, for example ${free} (change \`id:\` and any \`after:\` that points to it).`,
+      });
+    }
+    r.ok = r.problems.length === 0;
     const stats = r.tasks.length ? planStats(r.tasks) : null;
     if (!r.ok) {
       // A file the parser cannot read, or one missing fields, usually means the format is unknown to the agent:
@@ -499,7 +533,7 @@ export class Commands {
     const stats = planStats(r.tasks);
     const list = r.tasks.map((t) => `| ${t.id} | ${t.title.replace(/\|/g, "/")} | ${t.role} | ${t.size} | ${t.after.join(", ") || "-"} |`).join("\n");
     const content = `${summary?.trim() || "# Plan summary"}\n\n## Tasks (validated)\n\n| ID | Title | Role | Size | After |\n|---|---|---|---|---|\n${list}\n\nCritical path: ${stats.criticalPath.join(" → ")}. Peak parallel lanes: ${stats.peakLanes}.\n`;
-    this.svc.submitDoc("plan", ".asf/docs/plan-summary.md", content, a.agent, "tech-lead");
+    this.noteSubmitted(id, "plan", this.svc.submitDoc("plan", ".asf/docs/plan-summary.md", content, a.agent, "tech-lead"));
     await this.p.orch.onDocSubmitted("plan");
     return { text: `${check.text}\nImported ${r.tasks.length} tasks. Build tasks stay todo until the owner approves the plan.`, data: { ok: true, stats } };
   }

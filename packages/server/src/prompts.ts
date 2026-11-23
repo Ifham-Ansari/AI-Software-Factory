@@ -197,6 +197,8 @@ export interface RunPromptInput {
   extra?: string[];
   handoff?: string | null;
   diffStat?: string | null;
+  /** Direct-mode reviews: the task's changes as a unified diff (the project folder has no git to ask). */
+  diff?: string | null;
   agent?: string;
   roleTitle?: string;
   /** Learning memory: lessons that match this run's role and files. */
@@ -230,6 +232,10 @@ export function buildRunPrompt(i: RunPromptInput): string {
   }
   if (i.handoff) parts.push(`## Handoff from the engineer\n\n${i.handoff}`);
   if (i.diffStat) parts.push(`## Diff stat (base...head)\n\n\`\`\`\n${i.diffStat}\n\`\`\``);
+  if (i.diff)
+    parts.push(
+      `## The task's changes\n\nThis project folder is not a git repository, so here is the task's whole diff. Review it here; do not run \`git diff\`.\n\n\`\`\`diff\n${i.diff}\n\`\`\``,
+    );
   for (const e of i.extra ?? []) if (e) parts.push(e);
   if (i.inbox.length) {
     const shown = i.inbox.slice(-INBOX_LIMIT);

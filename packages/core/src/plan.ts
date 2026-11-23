@@ -1,5 +1,5 @@
 import YAML from "yaml";
-import { globsOverlap } from "./globs.ts";
+import { globsOverlap, matchesAny } from "./globs.ts";
 import { isRole, type PlanProblem, type Role, type TaskSpec } from "./types.ts";
 
 const FRONTMATTER = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
@@ -151,7 +151,73 @@ export function checkPlan(files: { file: string; source: string }[], repoFiles: 
     problems.push({ code: "cycle", tasks: [...new Set(cyc)], message: `dependency cycle: ${cyc.join(" -> ")}` });
   }
   problems.push(...findCollisions(tasks, repoFiles));
+  problems.push(...findVerifyOrder(tasks));
+  for (const t of tasks) {
+    const hidden = t.owns.filter(insideAsf);
+    if (hidden.length)
+      problems.push({
+        code: "asf_path",
+        tasks: [t.id],
+        message: `${t.id}: owns ${hidden.map((g) => JSON.stringify(g)).join(", ")}, inside .asf/ (AI Software Factory's own folder for plans and notes, hidden from the owner). The app's files go in the project itself, for example "index.html", "css/style.css", or "src/...".`,
+      });
+  }
   return { ok: problems.length === 0, tasks, problems };
+}
+
+/** Paths a verify command names: `index.html`, `css/menu.css`, `src/app/page.tsx` (words with a file extension). */
+function verifyPaths(verify: string): string[] {
+  const out = new Set<string>();
+  for (const m of verify.matchAll(/(?:^|[\s'"=(])((?:\.\/)?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][\w]{0,7})(?=$|[\s'");&|<>])/g)) {
+    const p = m[1]!.replace(/^\.\//, "");
+    // Not file names: versions, domains, and a grep pattern's escaped dots.
+    if (/^\d+(\.\d+)+$/.test(p) || /^(www\.|https?)/.test(p) || /\.(com|org|net|io)$/.test(p)) continue;
+    out.add(p);
+  }
+  return [...out];
+}
+
+/**
+ * A task's verify runs when that task finishes, so it can only check files that exist by then: its own, those of
+ * the tasks it comes after, and the project's. A verify that checks a file another task creates later (or at the
+ * same time) fails every time and blocks the task.
+ */
+export function findVerifyOrder(tasks: Pick<TaskSpec, "id" | "after" | "owns" | "verify">[]): PlanProblem[] {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const before = (id: string, seen = new Set<string>()): Set<string> => {
+    for (const d of byId.get(id)?.after ?? []) {
+      if (seen.has(d)) continue;
+      seen.add(d);
+      before(d, seen);
+    }
+    return seen;
+  };
+  const problems: PlanProblem[] = [];
+  for (const t of tasks) {
+    const earlier = before(t.id);
+    const late = new Map<string, string[]>();
+    for (const p of verifyPaths(t.verify ?? "")) {
+      if (matchesAny(t.owns, p)) continue;
+      const owners = tasks.filter((o) => o.id !== t.id && matchesAny(o.owns, p)).map((o) => o.id);
+      if (!owners.length || owners.some((o) => earlier.has(o))) continue;
+      late.set(p, owners);
+    }
+    if (late.size) {
+      const files = [...late.keys()];
+      const owners = [...new Set([...late.values()].flat())];
+      problems.push({
+        code: "verify_order",
+        tasks: [t.id, ...owners],
+        message: `${t.id}: verify checks ${files.join(", ")}, which ${owners.join(", ")} create${owners.length === 1 ? "s" : ""}, and ${t.id} does not come after ${owners.length === 1 ? "it" : "them"}, so it would fail. A task's verify may check only its own files and those of the tasks in its \`after:\`.`,
+      });
+    }
+  }
+  return problems;
+}
+
+/** A path in AI Software Factory's own folder; only its documents (.asf/docs/) may belong to a task. */
+function insideAsf(glob: string): boolean {
+  const g = glob.replace(/\\/g, "/").replace(/^\.\//, "");
+  return (g === ".asf" || g.startsWith(".asf/")) && !g.startsWith(".asf/docs/");
 }
 
 /** Two tasks with no dependency path between them must not own overlapping files. */

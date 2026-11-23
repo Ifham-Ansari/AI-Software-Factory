@@ -501,7 +501,12 @@ function EngineSection({
               <div className="mt-2 flex flex-col gap-2">
                 {picks.length === 0 ? (
                   <span className="text-[12.5px] text-ink-3" data-testid="engine-auto-picks">
-                    No models yet: add a working key.
+                    {/* Reading every provider's model list takes a few seconds after a start. */}
+                    {models.isPending || models.isFetching
+                      ? "Reading your providers' model lists…"
+                      : usable === 0
+                        ? "No models yet: add a working key."
+                        : "None of your keys' providers offers a free model with tool calling right now. Try their keys on API keys, or add a key from another provider."}
                   </span>
                 ) : (
                   <>

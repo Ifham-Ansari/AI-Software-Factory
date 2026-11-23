@@ -225,6 +225,8 @@ export interface TaskMeta {
   /** Status to return to after a blocking question is answered. */
   resumeStatus?: TaskStatus;
   lastVerify?: { code: number; output: string; at: string };
+  /** Planning task: the document version its run submitted (that version's approval does not stop it). */
+  submitted?: { doc: string; version: number };
   [k: string]: unknown;
 }
 

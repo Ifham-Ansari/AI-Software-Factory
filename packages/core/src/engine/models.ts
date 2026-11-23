@@ -80,6 +80,9 @@ export function rankModels(provider: string, models: ModelInfo[]): ModelInfo[] {
   const paid = preset?.paidModels ? new RegExp(preset.paidModels, "i") : null;
   const usable = models.filter((m) => {
     if (!m.id || NOT_FOR_AGENTS.test(m.id)) return false;
+    // Too small to drive an agent (a 1.7B model was picked for light work): tool use over many steps needs more.
+    const b = paramsBillions(m.id);
+    if (b > 0 && b < 7) return false;
     if (m.tools === false) return false;
     // Only free models where a provider also sells paid ones: a paid one would fail without credit, or spend it.
     if (free && !(m.free === true || free.test(m.id))) return false;

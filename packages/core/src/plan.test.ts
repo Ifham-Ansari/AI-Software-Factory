@@ -49,6 +49,27 @@ describe("parseTaskFile", () => {
 });
 
 describe("checkPlan", () => {
+  it("refuses a verify that checks files a later task creates (it would fail every time)", () => {
+    // From a real plan: the navigation task ran first but its verify checked the pages other tasks create.
+    const r = checkPlan([
+      task("T014", { role: "frontend", owns: ["css/navigation.css", "js/navigation.js"], verify: "test -f css/navigation.css && grep -q 'home' js/navigation.js && test -f index.html && test -f home.html && test -f menu.html" }),
+      task("T015", { role: "frontend", after: ["T014"], owns: ["css/menu.css", "js/menu.js", "menu.html"], verify: "test -f menu.html && grep -q 'filter' js/menu.js && test -f css/navigation.css" }),
+      task("T017", { role: "frontend", after: ["T014"], owns: ["home.html", "index.html", "css/home.css"], verify: "test -f index.html && test -f ./css/home.css" }),
+    ]);
+    expect(r.problems.map((p) => [p.code, p.tasks.join(",")])).toEqual([["verify_order", "T014,T017,T015"]]);
+    expect(r.problems[0]!.message).toMatch(/^T014: verify checks index\.html, home\.html, menu\.html, which T017, T015 create, and T014 does not come after them/);
+  });
+
+  it("refuses app files inside .asf/ (AI Software Factory's own folder), but not its documents", () => {
+    const r = checkPlan([
+      task("T001", { role: "frontend", owns: [".asf/static/index.html", ".asf/static/css/home.css"] }),
+      task("T002", { role: "frontend", owns: ["index.html", "css/style.css"] }),
+      task("T003", { owns: [".asf/docs/contracts/api.md"] }),
+    ]);
+    expect(r.problems.map((p) => [p.code, p.tasks.join(",")])).toEqual([["asf_path", "T001"]]);
+    expect(r.problems[0]!.message).toMatch(/owns "\.asf\/static\/index\.html", "\.asf\/static\/css\/home\.css", inside \.asf\/.*The app's files go in the project itself/);
+  });
+
   it("accepts a valid plan", () => {
     const r = checkPlan([
       task("T000", { role: "tech-lead", owns: ["backend/app/main.py", "frontend/package.json"] }),
