@@ -84,7 +84,7 @@ Per-run `settings.json`:
 
 ## Skills placement
 
-Project `.claude/skills/` are auto-discovered from the working directory up to the repo root. That would offer every role every skill, so AI Software Factory keeps skills in `.asf/skills/` (not discovered) and injects the role's SKILL.md bodies, in `roles.yaml` order, through `--append-system-prompt-file`. References and templates stay on disk under `.asf/skills/<skill>/` and are opened by the agent on demand. See `docs/decisions/0003-skill-placement.md`.
+Project `.claude/skills/` are auto-discovered from the working directory up to the repo root. That would offer every role every skill, so AI Software Factory keeps skills in `.asf/skills/` (not discovered) and injects the role's SKILL.md bodies, in `roles.yaml` order, through `--append-system-prompt-file`, with only the run's `## Mode:` section of each (decision 0016). References and templates stay on disk under `.asf/skills/<skill>/` and are opened by the agent on demand. See `docs/decisions/0003-skill-placement.md`.
 
 ## Things AI Software Factory deliberately does not use
 

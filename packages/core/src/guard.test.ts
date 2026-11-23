@@ -145,8 +145,41 @@ describe("guard: direct workspace mode", () => {
   });
 });
 
+describe("guard: shell commands that write files", () => {
+  const fwd = (p: string) => path.resolve(p).replace(/\\/g, "/");
+  const ok = (c: string) => expect(guardDecision(bash(c), ctx).allow, c).toBe(true);
+  const no = (c: string) => expect(guardDecision(bash(c), ctx).allow, c).toBe(false);
+
+  it("stay inside the worktree (or a temp folder), like the Write tool", () => {
+    ok("mkdir -p backend/tests/fixtures && touch backend/tests/fixtures/a.json");
+    ok("npm test > .asf/handoffs/test-output.txt 2>&1");
+    ok("pytest -q 2>/dev/null | tee /tmp/out.txt");
+    ok(`cp ${fwd("/opt/templates/x.py")} backend/tests/x.py`);
+    ok("chmod +x backend/tests/run.sh");
+    // A lost agent creating folders in another project (it happened: AI Software Factory's own source).
+    no(`mkdir -p "${fwd("/projects/ai-software-factory/.asf/tasks")}"`);
+    no(`cd ${fwd("/elsewhere")} && mkdir .asf`);
+    no("touch ../other-agent/file.txt");
+    no("echo hi > ~/notes.txt");
+    no(`cp backend/tests/x.py ${fwd("/elsewhere/x.py")}`);
+    no("mv backend/tests/a.py ../a.py");
+    expect(guardDecision(bash("touch ../x"), ctx).reason).toMatch(/outside your worktree/);
+  });
+
+  it.runIf(process.platform === "win32")("reads Git Bash drive paths and Windows paths in quotes", () => {
+    const gitBash = `/${WT[0]!.toLowerCase()}${WT.slice(2).replace(/\\/g, "/")}`;
+    ok(`mkdir -p ${gitBash}/backend/tests/x`);
+    ok(`mkdir -p "${WT}\\backend\\tests\\y"`);
+    no(`mkdir -p "${path.resolve("/elsewhere")}\\z"`);
+  });
+});
+
 describe("splitCommands", () => {
   it("splits on operators and respects quotes", () => {
     expect(splitCommands(`git commit -m "a && b"; ls | wc -l`)).toEqual([["git", "commit", "-m", "a && b"], ["ls"], ["wc", "-l"]]);
+  });
+
+  it("keeps backslashes in double quotes unless they escape $ ` \" or \\, as bash does", () => {
+    expect(splitCommands(String.raw`mkdir "C:\Users\me" "a\"b" 'c\d'`)).toEqual([["mkdir", String.raw`C:\Users\me`, 'a"b', String.raw`c\d`]]);
   });
 });

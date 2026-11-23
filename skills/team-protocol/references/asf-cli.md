@@ -114,7 +114,7 @@ asf plan submit .asf/tasks/       # import task files into the board
 asf plan check .asf/tasks/        # same validation without importing
 ```
 
-Validation is deterministic and checks: required fields present, every `after` ID exists, no dependency cycles, and no ownership collisions (two tasks with no dependency path between them whose `owns` globs overlap). It prints each problem with the task IDs involved. The plan is not imported until it passes, and build tasks stay `todo` until the owner approves the plan in the dashboard.
+Validation is deterministic and checks: required fields present, every `after` ID exists, no dependency cycles, no ownership collisions (two tasks with no dependency path between them whose `owns` globs overlap), no app files inside `.asf/` (only `.asf/docs/` may be owned), no reuse of an ID that a started, finished, or cancelled task already has, and no `verify` that checks files another task creates later (a verify may check only the task's own files and those of the tasks in its `after`). It prints each problem with the task IDs involved; when a file cannot be read or misses required fields, it also prints the task-file format (only `.md` files in the folder are read). The plan is not imported until it passes, and build tasks stay `todo` until the owner approves the plan in the dashboard.
 
 ## Review and QA (reviewer, QA, and designer roles)
 

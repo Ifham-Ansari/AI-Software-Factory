@@ -1,14 +1,15 @@
 import { useNeedsYou } from "../screens/NeedsYou";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useLive, useEvents } from "../lib/live";
+import { noteStore, unreadByScreen, useNotes } from "../lib/notify";
 import { useAction, useProject } from "../lib/queries";
 import { href } from "../lib/router";
 import { useTheme, type ThemePref } from "../lib/theme";
 import { PHASE_LABELS, PHASES, type Phase, type ProjectInfo } from "../lib/types";
 import { CountBadge, Icon, Modal, toast, toastError } from "./ui";
 import { RequestChangeButton } from "./Changes";
-import { Bell, NotificationToasts } from "./Notifications";
+import { Bell, LEVEL, NotificationToasts } from "./Notifications";
 import { Logo } from "./Logo";
 
 export const SCREENS: { id: string; label: string; icon: string; group: string }[] = [
@@ -24,6 +25,7 @@ export const SCREENS: { id: string; label: string; icon: string; group: string }
   { id: "preview", label: "Preview", icon: "preview", group: "Build" },
   { id: "memory", label: "Memory", icon: "memory", group: "Project" },
   { id: "usage", label: "Usage", icon: "usage", group: "Project" },
+  { id: "keys", label: "API keys", icon: "key", group: "Project" },
   { id: "settings", label: "Settings", icon: "settings", group: "Project" },
 ];
 const GROUPS = ["You", "Plan", "Build", "Project"];
@@ -54,6 +56,18 @@ export function Shell({ pid, screen, children }: { pid: string; screen: string; 
   const p = project.data;
   const alerts = p?.state.alerts?.length ?? 0;
   const needs = useNeedsYou(pid).data?.length ?? 0;
+  const notes = useNotes(pid);
+  // Tabs with new notifications are highlighted until the owner opens them.
+  const fresh = unreadByScreen(notes);
+  useEffect(() => {
+    // Looking at a screen reads its notifications (not while the browser tab is in the background).
+    const mark = () => {
+      if (document.visibilityState === "visible") noteStore(pid).markScreenRead(screen);
+    };
+    mark();
+    document.addEventListener("visibilitychange", mark);
+    return () => document.removeEventListener("visibilitychange", mark);
+  }, [pid, screen, notes.notes]);
 
   return (
     <div className="grid h-full grid-cols-[240px_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] bg-chrome max-[1100px]:grid-cols-[64px_minmax(0,1fr)]">
@@ -86,6 +100,8 @@ export function Shell({ pid, screen, children }: { pid: string; screen: string; 
               <div className="hidden h-px bg-rule-strong max-[1100px]:my-2 max-[1100px]:block" aria-hidden />
               {SCREENS.filter((s) => s.group === g).map((s) => {
                 const active = screen === s.id;
+                const news = active ? undefined : fresh.get(s.id);
+                const tone = news ? LEVEL[news.level].color : undefined;
                 const badge =
                   s.id === "needs"
                     ? needs
@@ -99,8 +115,11 @@ export function Shell({ pid, screen, children }: { pid: string; screen: string; 
                     key={s.id}
                     href={href(pid, s.id)}
                     aria-current={active ? "page" : undefined}
-                    title={s.label}
-                    className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.75 text-[13.5px] transition-[background-color,color,box-shadow] duration-150 max-[1100px]:justify-center max-[1100px]:px-0 max-[1100px]:py-2 ${active ? "bg-surface font-semibold text-ink shadow-(--shadow-sm) ring-1 ring-rule" : "text-ink-2 hover:bg-surface/60 hover:text-ink"}`}
+                    title={news ? `${s.label}: ${news.count} new` : s.label}
+                    data-new={news?.level}
+                    // A tint in the notification's color (a variable, so the hover color still wins).
+                    style={tone ? ({ "--nav-tint": `color-mix(in srgb, ${tone} 11%, transparent)` } as CSSProperties) : undefined}
+                    className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.75 text-[13.5px] transition-[background-color,color,box-shadow] duration-150 max-[1100px]:justify-center max-[1100px]:px-0 max-[1100px]:py-2 ${active ? "bg-surface font-semibold text-ink shadow-(--shadow-sm) ring-1 ring-rule" : news ? "bg-(--nav-tint) font-semibold text-ink hover:bg-surface/60" : "text-ink-2 hover:bg-surface/60 hover:text-ink"}`}
                   >
                     {active && (
                       <span
@@ -108,14 +127,31 @@ export function Shell({ pid, screen, children }: { pid: string; screen: string; 
                         className="bg-brand absolute top-1/2 left-0 h-4 w-0.75 -translate-y-1/2 rounded-r-full"
                       />
                     )}
-                    <Icon
-                      name={s.icon}
-                      size={17}
-                      className={
-                        active ? "text-accent" : "text-ink-3 transition-colors group-hover:text-ink-2"
-                      }
-                    />
-                    <span className="flex-1 max-[1100px]:sr-only">{s.label}</span>
+                    <span className="relative flex" style={tone ? { color: tone } : undefined}>
+                      <Icon
+                        name={s.icon}
+                        size={17}
+                        className={
+                          active
+                            ? "text-accent"
+                            : tone
+                              ? ""
+                              : "text-ink-3 transition-colors group-hover:text-ink-2"
+                        }
+                      />
+                      {news && (
+                        <span
+                          aria-hidden
+                          data-testid={`nav-new-${s.id}`}
+                          className={`absolute -top-1 -right-1 h-2 w-2 rounded-full ring-2 ring-chrome ${news.level === "action" || news.level === "warning" ? "pulse-dot" : ""}`}
+                          style={{ background: tone }}
+                        />
+                      )}
+                    </span>
+                    <span className="flex-1 max-[1100px]:sr-only">
+                      {s.label}
+                      {news && <span className="sr-only">, {news.count} new</span>}
+                    </span>
                     {badge > 0 && (
                       <span className="max-[1100px]:absolute max-[1100px]:-top-1 max-[1100px]:-right-1">
                         <CountBadge
@@ -150,6 +186,31 @@ export function Shell({ pid, screen, children }: { pid: string; screen: string; 
         {children}
       </main>
     </div>
+  );
+}
+
+/** Agents wait for a usage limit to reset: say until when, and offer to try now (after adding a key, say). */
+function LimitWait({ pid, until }: { pid: string; until: number }) {
+  const retry = useAction(pid, "POST", "/control/resume");
+  const at = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return (
+    <span
+      className="mono inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--warn)_45%,transparent)] bg-warn-soft py-0.5 pr-1 pl-2.5 text-[11px] leading-5 text-warn"
+      role="status"
+      data-testid="limit-wait"
+      title="Every key or account the agents can use has reached its usage limit. They carry on by themselves at this time."
+    >
+      <span aria-hidden className="pulse-dot h-1.5 w-1.5 rounded-full bg-warn" />
+      waiting for usage limits until {at}
+      <button
+        type="button"
+        className="ml-1 rounded-full border border-[color-mix(in_srgb,var(--warn)_45%,transparent)] px-2 font-semibold hover:bg-warn hover:text-chrome"
+        disabled={retry.isPending}
+        onClick={() => retry.mutate({}, { onSuccess: () => toast("Trying again now"), onError: toastError })}
+      >
+        Try now
+      </button>
+    </span>
   );
 }
 
@@ -218,6 +279,7 @@ function Header({ pid, p }: { pid: string; p: ProjectInfo | undefined }) {
             paused{p.state.pauseReason ? `: ${p.state.pauseReason}` : ""}
           </span>
         )}
+        {!p?.state.paused && (p?.state.limitedUntil ?? 0) > Date.now() && <LimitWait pid={pid} until={p!.state.limitedUntil!} />}
         <div className="ml-auto flex items-center gap-2">
           <RequestChangeButton pid={pid} p={p} />
           <Bell pid={pid} />

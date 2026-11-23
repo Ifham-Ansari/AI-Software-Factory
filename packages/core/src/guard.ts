@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { matchesAny } from "./globs.ts";
 import type { Role } from "./types.ts";
@@ -85,7 +87,24 @@ function isCredentialPath(abs: string, home: string): boolean {
   const n = norm(abs);
   const h = norm(home);
   if (inside(n, `${h}/.claude`) || n === `${h}/.claude.json`) return true;
+  // The built-in engine's API keys (~/.asf/keys.json) and their usage log.
+  if (/\/\.asf\/(keys|key-usage)\.json$/.test(n)) return true;
   return /\/\.credentials\.json$/.test(n) || /\/\.anthropic(\/|$)/.test(n) || /\/\.aws\/credentials$/.test(n);
+}
+
+/** Resolve symlinks of a path that may not exist yet: realpath of the deepest existing ancestor, plus the rest. */
+export function realpathDeep(p: string): string {
+  let probe = path.resolve(p);
+  const tail: string[] = [];
+  while (!fs.existsSync(probe) && probe !== path.dirname(probe)) {
+    tail.unshift(path.basename(probe));
+    probe = path.dirname(probe);
+  }
+  try {
+    return path.join(fs.realpathSync(probe), ...tail);
+  } catch {
+    return path.resolve(p);
+  }
 }
 
 export function guardDecision(call: ToolCall, ctx: GuardContext): GuardResult {
@@ -152,7 +171,8 @@ export function splitCommands(cmd: string): string[][] {
     const c = cmd[i]!;
     if (quote) {
       if (c === quote) quote = null;
-      else if (c === "\\" && quote === '"' && i + 1 < cmd.length) cur += cmd[++i];
+      // As in bash: inside double quotes a backslash escapes only $ ` " \ (so "C:\Users\x" stays a Windows path).
+      else if (c === "\\" && quote === '"' && i + 1 < cmd.length && '$`"\\'.includes(cmd[i + 1]!)) cur += cmd[++i];
       else cur += c;
       continue;
     }
@@ -223,24 +243,83 @@ function checkBash(command: string, ctx: GuardContext, cwd: string): GuardResult
   if (credPatterns.some((r) => r.test(command)) || command.replace(/\\/g, "/").toLowerCase().includes(`${home.toLowerCase()}/.claude`)) {
     return deny("reading Claude credentials or config (~/.claude) is never allowed");
   }
+  if (/\.asf[\\/]+(keys|key-usage)\.json/i.test(command)) return deny("the team's API keys (~/.asf/keys.json) are never readable by agents");
   if (/asf\.db\b/.test(command)) return deny("never touch .asf/asf.db; the asf CLI is the only writer of board state");
-  if (/guard\.json|\.asf[\\/]runs\b|ASF_GUARD_FILE|disableAllHooks/.test(command)) return deny("the run's guard and hook configuration are off limits");
+  if (/guard\.json|\.asf[\\/]runs\b|\.asf[\\/]sessions\b|ASF_GUARD_FILE|disableAllHooks/.test(command)) return deny("the run's guard and hook configuration are off limits");
 
+  // `cd` changes where later relative paths in the same line point.
+  let here = cwd;
   for (const words of splitCommands(command)) {
     const { env, argv } = stripPrefix(words);
     if (argv.length === 0) continue;
     const prog = base(argv[0]!);
     const args = argv.slice(1);
+    if (prog === "cd") {
+      const t = args.find((a) => !a.startsWith("-"));
+      if (!t || /^(~|\$HOME|\$\{HOME\})([\\/]|$)/.test(t)) here = ctx.homeDir;
+      else if (!/^[$%]/.test(t)) here = path.resolve(here, shellPath(t));
+      continue;
+    }
     let r: GuardResult = allow();
     if (prog === "git") r = checkGit(args, ctx);
-    else if (prog === "rm") r = checkRm(args, ctx, cwd);
+    else if (prog === "rm") r = checkRm(args, ctx, here);
     else if (prog === "docker" || prog === "docker-compose") r = checkDocker(prog === "docker-compose" ? ["compose", ...args] : args, env, ctx);
     else if (prog === "curl" || prog === "wget") r = checkNet(prog, args, ctx);
     else if (["sh", "bash", "zsh", "dash"].includes(prog)) {
       const i = args.indexOf("-c");
-      if (i >= 0 && args[i + 1]) r = checkBash(args[i + 1]!, ctx, cwd);
+      if (i >= 0 && args[i + 1]) r = checkBash(args[i + 1]!, ctx, here);
     }
+    if (r.allow) r = checkWrites(prog, args, ctx, here);
     if (!r.allow) return r;
+  }
+  return allow();
+}
+
+/** A path in a shell command as Node sees it: Git Bash's /c/Users/… is C:/Users/… on Windows. */
+function shellPath(p: string): string {
+  return process.platform === "win32" && /^\/[a-zA-Z](\/|$)/.test(p) ? `${p[1]}:/${p.slice(3)}` : p;
+}
+
+/** Devices and temp folders every command may write to. */
+function scratchPath(p: string): boolean {
+  if (/^(\/dev\/(null|stdout|stderr)|nul|NUL)$/.test(p) || /^\/tmp(\/|$)/.test(p)) return true;
+  if (/^(\$TMPDIR|\$\{TMPDIR\}|\$TEMP|\$TMP|%TEMP%|%TMP%)([\\/]|$)/.test(p)) return true;
+  return !/^[$%~]/.test(p) && path.isAbsolute(shellPath(p)) && inside(shellPath(p), os.tmpdir());
+}
+
+/** Commands whose path arguments are all written (created, moved, or changed). */
+const WRITES_ALL = new Set(["mkdir", "touch", "tee", "mv", "chmod", "chown", "truncate"]);
+/** Commands that write only their last path argument (the destination). */
+const WRITES_LAST = new Set(["cp", "ln", "install", "rsync"]);
+
+/**
+ * Shell commands that create or change files, and output redirects, stay inside the worktree (or a temp folder),
+ * like the Write and Edit tools: an agent once created folders in AI Software Factory's own source while lost.
+ * Reading anywhere is fine. A path the guard cannot resolve (a variable) is allowed, except the home folder.
+ */
+function checkWrites(prog: string, args: string[], ctx: GuardContext, cwd: string): GuardResult {
+  const targets: string[] = [];
+  const paths: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    const redirect = /^\d*>>?(.*)$/.exec(a);
+    if (redirect) {
+      const t = redirect[1] || args[++i];
+      if (t && !t.startsWith("&")) targets.push(t);
+      continue;
+    }
+    if (!a.startsWith("-")) paths.push(a);
+  }
+  if (WRITES_ALL.has(prog)) targets.push(...paths);
+  else if (WRITES_LAST.has(prog) && paths.length >= 2) targets.push(paths[paths.length - 1]!);
+  const real = ctx.realpath ?? ((p: string) => p);
+  const wt = real(path.resolve(ctx.worktree));
+  const outside = (raw: string) => deny(`${prog} would write to ${raw}, outside your worktree (${ctx.worktree}). Create and change files only inside it.`);
+  for (const raw of targets) {
+    if (scratchPath(raw)) continue;
+    if (/^(~|\$HOME|\$\{HOME\}|%USERPROFILE%)([\\/]|$)/.test(raw)) return outside(raw);
+    if (/^[$%]/.test(raw)) continue;
+    if (!inside(real(path.resolve(cwd, shellPath(raw))), wt)) return outside(raw);
   }
   return allow();
 }

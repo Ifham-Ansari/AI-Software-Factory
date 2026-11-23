@@ -102,7 +102,7 @@ export interface TaskSpec {
 }
 
 export interface PlanProblem {
-  code: "missing_field" | "unknown_after" | "cycle" | "role" | "collision" | "duplicate_id" | "parse";
+  code: "missing_field" | "unknown_after" | "cycle" | "role" | "collision" | "duplicate_id" | "parse" | "asf_path" | "id_taken" | "verify_order";
   tasks: string[];
   message: string;
 }

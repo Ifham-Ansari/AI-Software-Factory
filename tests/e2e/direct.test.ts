@@ -70,6 +70,11 @@ describe("direct workspace mode (no git, fake claude)", () => {
     const diff = await h.api("GET", "/tasks/T001/diff");
     expect(diff.files).toEqual([{ path: "src/T001.txt", status: "added" }]);
     expect(diff.diff).toContain("+work of T001");
+    // There is no git here, so the review run got the task's diff in its prompt.
+    const review = svc.runs({ task: "T001" }).find((r) => r.stage === "review")!;
+    const reviewPrompt = fs.readFileSync(path.join(h.project.paths.runs, review.id, "prompt.md"), "utf8");
+    expect(reviewPrompt).toContain("## The task's changes");
+    expect(reviewPrompt).toContain("+work of T001");
 
     // Live progress: the agent's plan and plain-language activity are stored.
     expect(JSON.parse(String(a.todos))).toHaveLength(3);

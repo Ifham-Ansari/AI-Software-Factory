@@ -92,7 +92,11 @@ function TeamBuilder({ pid, plan, project }: { pid: string; plan: PlanInfo; proj
         <Stat
           label="estimated tokens"
           value={fmtTokens(plan.estimate.totalTokens)}
-          sub={`${fmtTokens(project.quota.allowance ?? 0)} / day allowance`}
+          sub={
+            project.settings.engine === "builtin"
+              ? `≈ ${(plan.estimate.totalRequests ?? 0).toLocaleString()} API requests (free tiers limit these per day)`
+              : `${fmtTokens(project.quota.allowance ?? 0)} / day allowance`
+          }
         />
         <Stat
           label="rough time"

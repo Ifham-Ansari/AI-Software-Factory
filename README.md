@@ -41,7 +41,7 @@ Describe an app in plain words. A product manager, tech lead, designer, engineer
 
 ## What is AI Software Factory?
 
-AI Software Factory (`asf` for short) turns Claude Code into a small software company that works for you. Every team member is a headless **Claude Code** process. Each one follows a plain-markdown playbook (a "skill") that you can read and edit. Everything they do streams to a dashboard on `http://127.0.0.1`: files edited, commands run, messages, decisions, and reviews.
+AI Software Factory (`asf` for short) turns an AI model into a small software company that works for you. Every team member is either a headless **Claude Code** process (with your Claude subscription) or an agent on the **built-in engine**, which runs on free API keys or a model on your own computer, with no subscription at all ([how](docs/engine.md)). Each one follows a plain-markdown playbook (a "skill") that you can read and edit. Everything they do streams to a dashboard on `http://127.0.0.1`: files edited, commands run, messages, decisions, and reviews.
 
 **What you get at the end:** a working, tested app in your own folder. The default stack is **Next.js + FastAPI + PostgreSQL**, with Docker Compose for local development and GitHub Actions CI. AI Software Factory never deploys anything.
 
@@ -71,7 +71,7 @@ Pick **Auto** (the default) to let the tech lead decide, or choose a track yours
 | | |
 |---|---|
 | 🏠 **Local first** | Runs on your machine, binds to `127.0.0.1`, requires a random access token, and has no telemetry or cloud service. |
-| 🔑 **Your subscription** | Uses the official `claude` CLI with your own login. It never reads or stores your credentials and never calls Anthropic APIs directly. |
+| 🔑 **Your subscription, or none** | Uses the official `claude` CLI with your own login, and never reads or stores your Claude credentials. No subscription? The built-in engine runs on free API keys from 14 providers (Gemini, Groq, OpenRouter, NVIDIA, Mistral, Z.ai, Cloudflare, and more, one even without a key) or a local model (Ollama, LM Studio). It picks a small model for light tasks and the strongest for complex ones, a team can pool each member's own keys, and work moves to the next model or key when one hits its limit. |
 | 🧭 **You stay in charge** | Approval gates for the PRD, design, architecture, plan, and release, plus a kill switch. Agents ask you before anything that costs money, needs a key, or changes scope. |
 | 🧱 **Real engineering, not vibes** | Contracts before code and test-first tasks. A `verify` command must pass before a task counts as done. Every task gets independent code review, QA with bug reports, and project checks after it finishes. |
 | 👀 **Watch them work** | Each agent's card shows what it is doing in plain words ("Running the tests", "Messaging the frontend engineer"), its own plan as a live checklist with a progress bar, the files it touched, and where its task is. |
@@ -100,8 +100,8 @@ Pick **Auto** (the default) to let the tech lead decide, or choose a track yours
 | Tool | Why | Check |
 |---|---|---|
 | **Node.js 22.18+** | Runs AI Software Factory | `node --version` |
-| **Git** (any recent version) | Claude Code needs it on Windows (Git Bash). AI Software Factory itself does not use git in your project | `git --version` |
-| **Claude Code**, logged in | Runs the agents ([install](https://docs.claude.com/en/docs/claude-code)). Run `claude` once to log in | `claude --version` |
+| **Git** (any recent version) | Agents run shell commands with its bash on Windows (Git Bash). AI Software Factory itself does not use git in your project | `git --version` |
+| **Claude Code**, logged in, **or** a free API key | Runs the agents. Either [Claude Code](https://docs.claude.com/en/docs/claude-code) with your Claude subscription (run `claude` once to log in), or the **built-in engine** with a free key from Gemini, Groq, OpenRouter, Mistral, or Cerebras, or a local model with Ollama or LM Studio ([guide](docs/engine.md)) | `claude --version` or `asf keys` |
 | **pnpm** | Installs AI Software Factory (ships with Node through corepack) | `corepack pnpm --version` |
 | **Docker** with Compose | Gives each agent its own database for the apps it builds | `docker compose version` |
 | **uv** | Python tooling for the default FastAPI backend ([install](https://docs.astral.sh/uv/)) | `uv --version` |
@@ -114,7 +114,7 @@ It runs on macOS, Linux, and Windows, and is developed on Windows with Git Bash.
 
 ### Windows: double-click `run.bat`
 
-Install [Node.js 22.18+](https://nodejs.org) and [Claude Code](https://docs.claude.com/en/docs/claude-code) (run `claude` once to log in), download or clone this repository, then **double-click `run.bat`** in its folder.
+Install [Node.js 22.18+](https://nodejs.org) and, if you have a Claude subscription, [Claude Code](https://docs.claude.com/en/docs/claude-code) (run `claude` once to log in). Then download or clone this repository and **double-click `run.bat`** in its folder.
 
 The first time, it checks your tools, installs the dependencies, and builds the dashboard (a minute or two). Then it starts AI Software Factory and opens the dashboard in your browser, with the folder picker in `%USERPROFILE%\asf-projects`. Create a folder there for your app, or browse to any other folder. Keep the window open while you work, and press **Ctrl+C** in it to stop.
 
@@ -164,6 +164,14 @@ asf up                  # starts AI Software Factory and opens the dashboard for
 
 `asf up` prints a link like `http://127.0.0.1:4800/?token=…` and opens it in your browser. **Keep that terminal open: Ctrl+C stops AI Software Factory and every agent.** If it is already running, `asf up` in another folder just opens the dashboard there.
 
+### No Claude subscription? Use free API keys
+
+1. Open **API keys** in the dashboard, pick a provider (Gemini, Groq, OpenRouter, NVIDIA, Mistral, Z.ai, Cloudflare, and more, or Ollama / LM Studio on your own computer), follow its "Get a free key" link, and add the key under your name. Teammates add their own keys the same way, on the same computer.
+2. In **Settings → Agent engine**, choose **Built-in engine**, pick a model or two from the live list, and save.
+3. Send a small request first. Free tiers limit requests per day: the [built-in engine guide](docs/engine.md) explains how to choose models and make the limits last.
+
+From a terminal: `asf keys providers`, then `asf keys add groq --label "Your name"`.
+
 > [!TIP]
 > Agents work **directly in the folder you choose**. AI Software Factory adds one hidden `.asf` folder (plans, documents, the team's notes) and nothing else: no git repository, branches, or commits. If your folder already uses git, it is left to you, and agents can only read it. To remove the global command, run `asf setup --uninstall`.
 
@@ -184,7 +192,7 @@ For a small change, type it on the Idea screen and leave the process on **Auto**
    * **Agents** shows the team at work: each agent's status in plain words, its plan as a checklist with a progress bar, the files it touched, and its task's stage. Open **Details** on a card for the full live transcript: reasoning, each edit, each command and its output.
    * On the **Live board**, tasks move from *To do* to *Done*.
    * The **Team feed** shows agents messaging each other, reviews, and blocked actions.
-   * Notifications pop up when an agent asks you something, a document needs your approval, a task is blocked, or a task is done. You can turn on desktop notifications from the bell.
+   * Notifications pop up when an agent asks you something, a document needs your approval, a task is blocked, or a task is done. The screen each one belongs to is highlighted in the sidebar until you open it, and opening a notification marks it read. You can turn on desktop notifications from the bell.
    * **Changed your mind?** Click **Request a change** in the header any time after the PRD is approved. The PM updates the PRD and the tech lead updates the plan, each for your approval, and new tasks join the build. Finished work is kept unless your change says otherwise.
 9. **Release.** QA runs the full suite on the finished project, and AI Software Factory writes a release summary for you to approve. Everything is already in your folder.
 
@@ -243,7 +251,8 @@ Run `asf up` (or `asf init`) inside a folder that already has code. On your firs
 | **Preview** | Run the finished app (Docker) and use it in the dashboard |
 | **Memory** | The lessons the team learned on this project. Add, pin, or remove them |
 | **Usage** | Tokens, runs, and cost per day and per role, against your optional daily budget |
-| **Settings** | Concurrency, gates, QA per task, models per role, preview command, permission mode, check commands, and the **skills editor** |
+| **API keys** | The team's own keys for the built-in engine: add one under your name, test it, see each key's status (ready, limited until a time, rejected) and today's use per teammate |
+| **Settings** | The agent engine (Claude Code or built-in, and the built-in engine's models), concurrency, gates, QA per task, models per role, preview command, permission mode, check commands, and the **skills editor** |
 
 The header always shows the phase, open questions, notifications, **Request a change**, **Pause/Resume**, and the red **Kill switch**.
 
@@ -278,7 +287,8 @@ The header always shows the phase, open questions, notifications, **Request a ch
 |---|---|
 | `asf setup [--uninstall]` | Install (or remove) the global `asf` command so it works from any folder |
 | `asf init [folder]` | Make a folder an AI Software Factory project (adds only the hidden `.asf/` folder) |
-| `asf doctor [--login]` | Check prerequisites and print fixes. `--login` also confirms Claude Code is logged in (asks first, then sends one tiny prompt) |
+| `asf doctor [--login] [--keys]` | Check prerequisites and print fixes. `--login` also confirms Claude Code is logged in (asks first, then sends one tiny prompt). `--keys` checks every API key with its provider (uses no tokens) |
+| `asf keys [list\|add\|test\|remove\|providers]` | The team's API keys for the built-in engine. `asf keys add groq --label "Your name"` asks for the key |
 | `asf up [--port N] [--no-open]` | Start the server and dashboard on `127.0.0.1` (default port 4800) |
 | `asf status` | Phase, task counts, and working agents for the current project |
 | `asf pause` / `asf resume` | Stop / restart starting new agent runs |
@@ -299,7 +309,9 @@ A guard hook runs before every file edit and shell command an agent makes. It bl
 * change git state (add, commit, reset, checkout, push...) in your project;
 * delete files outside the project folder, or wipe another agent's Docker volumes;
 * call the internet with `curl`/`wget` (localhost only, unless a task allows it);
-* read Claude credentials or touch AI Software Factory's own database.
+* read Claude credentials or the team's API keys, or touch AI Software Factory's own database.
+
+With the built-in engine, the same checks run inside AI Software Factory before every tool call.
 
 Everything else in the shell is allowed, as in Claude Code, so agents can install packages, run tests, and start the app without being stopped. Destructive or paid actions need your approval.
 
@@ -308,7 +320,7 @@ Everything else in the shell is allowed, as in Claude Code, so agents can instal
 
 ### What it costs
 
-Every agent run uses your Claude Code subscription (or API billing, if you set that up in Claude Code). These controls keep it in check:
+With Claude Code, every agent run uses your Claude subscription (or API billing, if you set that up in Claude Code). With the built-in engine, it uses the free allowance of the team's API keys, or nothing at all with a local model; the Team builder estimates the API requests a build needs, and requests are trimmed to stay small ([guide](docs/engine.md#making-free-limits-last)). These controls keep it in check:
 
 * **Just enough process:** small changes go straight to an engineer. Only big requests get questions, a PRD, design, and architecture.
 * **Lighter model for routine runs:** sizing a request, answering teammates, code review, and QA checks use Sonnet, unless you choose a model per role in Settings.
@@ -325,6 +337,7 @@ Most settings live in the dashboard (**Settings**) and are stored per project:
 
 | Setting | Default | Notes |
 |---|---|---|
+| Agent engine | Claude Code | Or the built-in engine, on the team's API keys: then main and quick models (ordered `provider:model` lists; optional), automatic model choice by task (small models for light work, the strongest for complex work; on), the size of each request (32k tokens), and turns per run (50) |
 | Max concurrent agents | 3 | Total agents running at once |
 | Daily token cap | off | Optional. No new runs start once the cap is reached |
 | Approval gates | all on | PRD, design direction, screen designs, architecture, plan, release. Each can auto-approve |
@@ -347,9 +360,10 @@ my-app/                    your project: the agents' code goes here, like any de
     handoffs/, reviews/    the team's notes
     snapshots/             copies of each task's files from when it started (for "what changed")
     runs/                  each agent run's prompt and raw output
+    sessions/              built-in engine conversations, for resuming
 ```
 
-Per-user state (the list of your projects and the running server's address) lives in `~/.asf/`.
+Per-user state (the list of your projects, the running server's address, and the team's API keys for the built-in engine) lives in `~/.asf/`.
 
 ---
 
@@ -364,7 +378,13 @@ No. AI Software Factory is an independent open-source project that runs the offi
 <details>
 <summary><b>Does it send my code anywhere?</b></summary>
 
-Only Claude Code talks to Claude, exactly as when you use `claude` yourself. The server listens on `127.0.0.1`, requires a token, and has no telemetry.
+With Claude Code, only Claude Code talks to Claude, exactly as when you use `claude` yourself. With the built-in engine, what agents read is sent to the provider you chose (free tiers may keep prompts; see [Privacy](docs/engine.md#privacy)), or nowhere with a local model. The server listens on `127.0.0.1`, requires a token, and has no telemetry.
+</details>
+
+<details>
+<summary><b>Can I use it without a Claude subscription?</b></summary>
+
+Yes. Choose the **built-in engine** in Settings and add free API keys (Gemini, Groq, OpenRouter, NVIDIA, Mistral, Z.ai, Cloudflare, and more: the [guide](docs/engine.md#free-providers) lists 14) on **API keys**, or run a model on your own computer with Ollama or LM Studio. A team can each add their own key on the computer that runs AI Software Factory. Free models are weaker than Claude at long builds: small and medium requests work well. See the [built-in engine guide](docs/engine.md).
 </details>
 
 <details>
@@ -406,7 +426,7 @@ Yes, that is what skills are for. Edit them per project in **Settings → Skills
 <details>
 <summary><b>Can I use Codex or another agent CLI?</b></summary>
 
-Not yet. The runner is behind an interface so other CLIs can be added later.
+Not as such, but the built-in engine runs agents on any OpenAI-compatible API (including OpenAI's own, as a custom provider). Other agent CLIs can be added behind the same runner interface.
 </details>
 
 ---
@@ -415,7 +435,10 @@ Not yet. The runner is behind an interface so other CLIs can be added later.
 
 | Problem | Fix |
 |---|---|
-| `asf doctor` says Claude Code is missing | Install Claude Code, run `claude` once to log in, then `asf doctor --login` |
+| `asf doctor` says Claude Code is missing | Install Claude Code, run `claude` once to log in, then `asf doctor --login`. Or use the built-in engine with free API keys: `asf keys providers` |
+| Paused: "No working API key" | Add or fix a key on **API keys** (or `asf keys test`), check the models in **Settings → Agent engine**, then click **Resume** |
+| Header: "waiting for usage limits until …" | Every key (or your Claude account) has hit its limit. The agents carry on by themselves at that time, without starting over. To go on sooner, add a key from another provider (it is tried at once) or click **Try now** |
+| Built-in engine: agents finish without doing the work | The model is too small or cannot call tools. Choose a bigger model with tool calling ([guide](docs/engine.md#choosing-models)) |
 | The dashboard says "open the link printed by asf up" | The page needs the token. Use the full link from the terminal, or run `asf up` again to print it |
 | Port 4800 is in use | `asf up --port 4801` |
 | Backend tasks fail with "uv: command not found" | Install [uv](https://docs.astral.sh/uv/) and restart `asf up` |
@@ -439,19 +462,21 @@ corepack pnpm --filter @asf/dashboard dev    # dashboard dev server (proxies to 
 
 | Package | |
 |---|---|
-| `packages/core` | Pure logic: plan validation, collision checks, scheduler, permissions, guard, stream parsing, database schema |
-| `packages/server` | API, WebSocket events, orchestrator, agent runner, snapshots (plus an optional isolated git-worktree mode) |
+| `packages/core` | Pure logic: plan validation, collision checks, scheduler, permissions, guard, stream parsing, database schema, and the built-in engine's key selection, rate-limit parsing, and trimming |
+| `packages/server` | API, WebSocket events, orchestrator, agent runners (Claude Code and the built-in engine), snapshots (plus an optional isolated git-worktree mode) |
 | `packages/cli` | The `asf` command (owner and agent commands, guard hook) |
 | `packages/dashboard` | React + Vite + Tailwind dashboard |
-| `packages/fake-claude` | A stand-in for `claude` used by every test |
+| `packages/fake-claude` | Stand-ins used by every test: for `claude`, and (fake-llm) for an OpenAI-compatible provider |
 
-Node runs the TypeScript directly, and only the dashboard is built. Tests never call the real Claude. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [docs index](docs/README.md).
+Node runs the TypeScript directly, and only the dashboard is built. Tests never call the real Claude or any real provider. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [docs index](docs/README.md).
 
 ---
 
 ## Usage and terms
 
 AI Software Factory runs the official Claude Code CLI on your own machine, using your own Claude account and subscription (or API billing, if you configure that in Claude Code). Every agent run counts toward your Claude usage. AI Software Factory gives you budgets, a reserve, concurrency caps, and a kill switch, but **you are responsible for your usage and for complying with Anthropic's current terms of service and usage policies** for Claude and Claude Code.
+
+With the built-in engine, agents use the API keys you and your teammates add, and each key's use is covered by **its owner's agreement with that provider**. Use your own key; some providers do not allow sharing a key, and creating several accounts to get around a free limit breaks almost every provider's terms.
 
 AI Software Factory is an independent open-source project and is **not affiliated with, endorsed by, or sponsored by Anthropic**. "Claude" and "Claude Code" are trademarks of Anthropic and are used here only to describe compatibility.
 

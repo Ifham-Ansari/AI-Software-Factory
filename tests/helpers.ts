@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AsfServer, ClaudeRunner, git, initProject, type Project } from "@asf/server";
+import { AsfServer, ClaudeRunner, EngineRunner, git, initProject, KeyStore, type AgentRunner, type Project } from "@asf/server";
+import { startFakeLlm, type FakeLlm } from "../packages/fake-claude/src/llm.ts";
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const FAKE_CLAUDE = path.join(REPO, "packages/fake-claude/src/main.ts");
@@ -13,6 +14,9 @@ export interface Harness {
   server: AsfServer;
   project: Project;
   stateDir: string;
+  /** Built-in engine runs: the scripted provider and the team's keys (one working key to start with). */
+  fakeLlm?: FakeLlm;
+  keys?: KeyStore;
   api: (method: string, p: string, body?: unknown) => Promise<any>;
   invocations: () => any[];
   stop: () => Promise<void>;
@@ -90,7 +94,10 @@ export async function waitFor<T>(fn: () => T | Promise<T>, what: string, timeout
   }
 }
 
-export async function startHarness(scenario: Record<string, unknown>, opts: { name?: string; settings?: Record<string, unknown>; workspace?: "direct" | "isolated" } = {}): Promise<Harness> {
+export async function startHarness(
+  scenario: Record<string, unknown>,
+  opts: { name?: string; settings?: Record<string, unknown>; workspace?: "direct" | "isolated"; runner?: "claude" | "engine"; keys?: string[] } = {},
+): Promise<Harness> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asf-e2e-"));
   const root = path.join(dir, opts.name ?? "sample app");
   fs.mkdirSync(path.join(root, "src"), { recursive: true });
@@ -111,11 +118,29 @@ export async function startHarness(scenario: Record<string, unknown>, opts: { na
   await initProject(root, { workspace: opts.workspace ?? "isolated" });
 
   const h: Partial<Harness> = { dir, root, stateDir };
+  const engine = opts.runner === "engine";
+  h.keys = new KeyStore(process.env.ASF_HOME);
+  if (engine) {
+    // The built-in engine against a scripted OpenAI-compatible server. Test keys: "bad…" is rejected and
+    // "limited…" is always rate limited by fake-llm; anything else works.
+    h.fakeLlm = await startFakeLlm({ scenarioFile, stateDir });
+    for (const [i, key] of (opts.keys ?? ["test-key"]).entries()) h.keys.add({ provider: "custom", label: `Teammate ${i + 1}`, key, baseUrl: h.fakeLlm.url });
+  }
+  const runnerFactory = (): AgentRunner =>
+    engine ? new EngineRunner({ keys: h.keys!, settings: () => h.project!.svc.settings }) : new ClaudeRunner(FAKE_CLAUDE);
   const boot = async () => {
-    const server = new AsfServer({ port: 0, writeInfo: false, runnerFactory: () => new ClaudeRunner(FAKE_CLAUDE), autoStart: false });
+    const server = new AsfServer({ port: 0, writeInfo: false, runnerFactory, autoStart: false, keys: h.keys });
     await server.start();
     const project = await server.openProject(root);
-    project.svc.updateSettings({ scheduler_interval_ms: 150, port_base: 32000 + Math.floor(Math.random() * 200) * 50, verify_timeout_minutes: 1, existing: false, qa_per_task: true, ...(opts.settings ?? {}) } as any);
+    project.svc.updateSettings({
+      scheduler_interval_ms: 150,
+      port_base: 32000 + Math.floor(Math.random() * 200) * 50,
+      verify_timeout_minutes: 1,
+      existing: false,
+      qa_per_task: true,
+      ...(engine ? { engine: "builtin", engine_models: { strong: ["custom:fake-model"], fast: [] } } : {}),
+      ...(opts.settings ?? {}),
+    } as any);
     project.start();
     h.server = server;
     h.project = project;
@@ -176,6 +201,7 @@ export async function cleanup(h: Harness | undefined): Promise<void> {
   } catch {
     /* ignore */
   }
+  await h.fakeLlm?.close().catch(() => {});
   try {
     fs.rmSync(h.dir, { recursive: true, force: true, maxRetries: 3 });
   } catch {

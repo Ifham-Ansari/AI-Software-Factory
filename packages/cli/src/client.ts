@@ -42,6 +42,22 @@ export function findProjectRoot(dir = process.cwd()): string | null {
   }
 }
 
+/**
+ * The project `asf up` opens for a folder: the one the folder is in (people run it from a subfolder too), except
+ * that a new, empty folder is a project of its own even inside another project's folder. Otherwise a folder of
+ * projects that was itself set up as one would swallow every new project created in it.
+ */
+export function projectRootForUp(dir: string): string | null {
+  const cur = path.resolve(dir);
+  const root = findProjectRoot(cur);
+  if (!root || path.resolve(root) === cur) return root;
+  try {
+    return fs.readdirSync(cur).length === 0 ? null : root;
+  } catch {
+    return root;
+  }
+}
+
 export async function projectIdFor(root: string): Promise<string> {
   const { createHash } = await import("node:crypto");
   return createHash("sha1").update(path.resolve(root).replace(/\\/g, "/").toLowerCase()).digest("hex").slice(0, 10);

@@ -4,13 +4,56 @@ import path from "node:path";
 import type { Row } from "@asf/core";
 import type { TaskRow } from "./service.ts";
 
-// Prompt assembly. system.md = an AI Software Factory header + the role's SKILL.md bodies (roles.yaml order). It is identical
-// for every run of a role (no agent id, task, or mode in it), so Claude Code's prompt cache is reused across
-// runs and agents. Everything run-specific goes in the run prompt (user message), which stays lean: who you
+// Prompt assembly. system.md = an AI Software Factory header + the role's SKILL.md bodies (roles.yaml order), with
+// only this run's `## Mode:` section of each skill. It is identical for every run of a role in a mode (no agent
+// id or task in it), so Claude Code's prompt cache is reused across runs and agents (builds are almost all
+// `implement` runs). Everything run-specific goes in the run prompt (user message), which stays lean: who you
 // are, the task file, a few unread messages, and pointers to files by path.
 
 export function stripFrontmatter(md: string): string {
   return md.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+}
+
+/** "## Mode: survey (existing codebases)" \u2192 "survey". */
+function modeOf(heading: string): string | null {
+  return /^## Mode:\s*([\w-]+)/.exec(heading)?.[1]?.toLowerCase() ?? null;
+}
+
+/** A skill split at its `## ` headings (not inside code fences); the text before the first one is part 0. */
+function sections(body: string): string[] {
+  const out: string[] = [""];
+  let fence = false;
+  for (const line of body.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    if (!fence && line.startsWith("## ")) out.push("");
+    out[out.length - 1] += `${line}\n`;
+  }
+  return out;
+}
+
+/**
+ * A role's skill describes each kind of run under a `## Mode: <name>` heading, and a run needs only its own:
+ * planning skills are mostly modes (the Tech Lead's 8 modes are 80% of its skill), and every request of a run
+ * resends the instructions. The other modes become one line. A skill without a section for this mode (an engineer's,
+ * or a mode it does not describe) is kept whole.
+ */
+export function focusMode(body: string, mode: string | undefined, file: string): string {
+  if (!mode) return body;
+  const parts = sections(body);
+  const names = parts.map((p) => modeOf(p));
+  if (!names.includes(mode.toLowerCase())) return body;
+  const others = names.filter((n): n is string => n !== null && n !== mode.toLowerCase());
+  let noted = false;
+  return parts
+    .map((p, i) => {
+      const n = names[i];
+      if (n === null || n === mode.toLowerCase()) return p;
+      if (noted) return "";
+      noted = true;
+      return `## Other modes\n\nThis run is \`${mode}\`. The other modes (${others.join(", ")}) are left out here; they are in \`${file}\`.\n\n`;
+    })
+    .join("")
+    .trim();
 }
 
 export function readSkill(skillsDir: string, name: string): string | null {
@@ -18,13 +61,28 @@ export function readSkill(skillsDir: string, name: string): string | null {
   return fs.existsSync(f) ? stripFrontmatter(fs.readFileSync(f, "utf8")) : null;
 }
 
+/** The skill's one-line `description:` from its frontmatter. */
+export function skillDescription(skillsDir: string, name: string): string {
+  const f = path.join(skillsDir, name, "SKILL.md");
+  if (!fs.existsSync(f)) return "";
+  const fm = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/.exec(fs.readFileSync(f, "utf8"))?.[1] ?? "";
+  return (/^description:\s*(.+)$/m.exec(fm)?.[1] ?? "").trim();
+}
+
 export interface SystemPromptInput {
+  /**
+   * List the skills by path instead of including them, for models whose per-request limit is smaller than the
+   * skills (free tiers). The agent reads the files it needs.
+   */
+  lean?: boolean;
   roleTitle: string;
   project: string;
   skills: string[];
   skillsDir: string;
   /** Direct mode: the team shares the project folder and AI Software Factory handles everything git used to do. */
   direct?: boolean;
+  /** The run's mode (plan, verify, …): only that `## Mode:` section of each skill is included. */
+  mode?: string;
 }
 
 const DIRECT_NOTE = [
@@ -55,10 +113,28 @@ export function buildSystemPrompt(i: SystemPromptInput): string {
     "",
     ...(i.direct ? [DIRECT_NOTE] : []),
   ].join("\n");
+  const dir = i.skillsDir.replace(/\\/g, "/");
+  if (i.lean) {
+    const mode = i.mode?.toLowerCase();
+    const list = i.skills
+      .map((s) => {
+        // Point at this run's section, so the agent reads that part of a long skill.
+        const own = mode && sections(readSkill(i.skillsDir, s) ?? "").some((p) => modeOf(p) === mode);
+        return `- \`${dir}/${s}/SKILL.md\`: ${skillDescription(i.skillsDir, s) || s}${own ? ` (this run: its \`## Mode: ${mode}\` section)` : ""}`;
+      })
+      .join("\n");
+    return (
+      header +
+      "\n## Your skills (read them from these files)\n\n" +
+      "To keep each request small, your skills are not included here. **Before anything else, Read the first file** " +
+      "(how the team works and how to use the asf CLI). Read the others when your task needs them.\n\n" +
+      `${list}\n`
+    );
+  }
   const bodies = i.skills
     .map((s) => {
       const body = readSkill(i.skillsDir, s);
-      return body ? `\n\n---\n\n<!-- skill: ${s} -->\n${body}` : `\n\n<!-- skill ${s} not found -->`;
+      return body ? `\n\n---\n\n<!-- skill: ${s} -->\n${focusMode(body, i.mode, `${dir}/${s}/SKILL.md`)}` : `\n\n<!-- skill ${s} not found -->`;
     })
     .join("");
   return header + bodies + "\n";
@@ -121,6 +197,8 @@ export interface RunPromptInput {
   extra?: string[];
   handoff?: string | null;
   diffStat?: string | null;
+  /** Direct-mode reviews: the task's changes as a unified diff (the project folder has no git to ask). */
+  diff?: string | null;
   agent?: string;
   roleTitle?: string;
   /** Learning memory: lessons that match this run's role and files. */
@@ -154,6 +232,10 @@ export function buildRunPrompt(i: RunPromptInput): string {
   }
   if (i.handoff) parts.push(`## Handoff from the engineer\n\n${i.handoff}`);
   if (i.diffStat) parts.push(`## Diff stat (base...head)\n\n\`\`\`\n${i.diffStat}\n\`\`\``);
+  if (i.diff)
+    parts.push(
+      `## The task's changes\n\nThis project folder is not a git repository, so here is the task's whole diff. Review it here; do not run \`git diff\`.\n\n\`\`\`diff\n${i.diff}\n\`\`\``,
+    );
   for (const e of i.extra ?? []) if (e) parts.push(e);
   if (i.inbox.length) {
     const shown = i.inbox.slice(-INBOX_LIMIT);

@@ -46,7 +46,8 @@ describe("pipeline (fake claude)", () => {
       "backend:fix:resume": { steps: [{ expectPrompt: "Say fixed, not work" }, ...implementSteps("src/T001.txt", "fixed T001\n")] },
     });
     await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
-    await waitFor(done("T001"), "T001 done");
+    // Five runs (implement, review, fix, review, QA): slow when the whole suite runs at once.
+    await waitFor(done("T001"), "T001 done", 150_000);
     const svc = h.project.svc;
     const reviews = svc.reviews("T001");
     expect(reviews.map((r) => r.verdict)).toEqual(["changes_requested", "approved"]);
@@ -78,7 +79,8 @@ describe("pipeline (fake claude)", () => {
       "backend:fix:resume": { steps: [{ expectPrompt: "Wrong text" }, ...implementSteps("src/T001.txt", "fixed T001\n")] },
     });
     await seedBuild(h, { "T001.md": taskFile("T001", { role: "backend" }) });
-    await waitFor(done("T001"), "T001 done");
+    // Two rounds of implement, review, and QA: slow when the whole suite runs at once.
+    await waitFor(done("T001"), "T001 done", 150_000);
     const svc = h.project.svc;
     const bugs = svc.bugs("T001");
     expect(bugs).toHaveLength(1);
@@ -314,5 +316,16 @@ describe("pipeline (fake claude)", () => {
     const j = await cli(["plan", "check", dir, "--json"]);
     const parsed = JSON.parse(j.stdout);
     expect(parsed.data.problems.map((p: any) => [p.code, p.tasks.sort().join(",")])).toEqual(expect.arrayContaining([["collision", "T001,T002"], ["cycle", "T003,T004"]]));
+    // The task-file format is shown only when a file cannot be read or misses fields (an agent that does not
+    // know the format otherwise repeats the same mistake); collisions and cycles say what to fix themselves.
+    expect(r.stderr).not.toMatch(/How a task file looks/);
+    const bad = path.join(h.dir, "tasks-bad");
+    fs.mkdirSync(bad);
+    fs.writeFileSync(path.join(bad, "T001.md"), "---\nid: T001\ntitle: Home page\nrole: frontend\n---\n\n## Goal\nBuild it.\n");
+    const f = await cli(["plan", "check", bad]);
+    expect(f.status).toBe(1);
+    expect(f.stderr).toMatch(/required field "owns" is missing/);
+    expect(f.stderr).toMatch(/How a task file looks[\s\S]*owns: \[[\s\S]*verify: /);
+    expect(f.stderr).toMatch(/tech-lead\/templates\/task\.md/);
   });
 });

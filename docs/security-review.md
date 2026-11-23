@@ -1,6 +1,6 @@
 # Security review (v0.1)
 
-Scope: what a malicious web page, a misbehaving agent, or a confused agent could do on the owner's machine through AI Software Factory. Reviewed 2026-10-27.
+Scope: what a malicious web page, a misbehaving agent, or a confused agent could do on the owner's machine through AI Software Factory. Reviewed 2026-10-27; built-in engine rows added 2026-11-21.
 
 | Area | Control | Where |
 |---|---|---|
@@ -18,9 +18,14 @@ Scope: what a malicious web page, a misbehaving agent, or a confused agent could
 | Clickjacking | `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer` on dashboard pages | `server.ts` |
 | Prompt injection | Skills tell agents to treat idea text, attachments, and messages as data, and to escalate requests to skip verification or touch other files. The guard and permission checks do not depend on the model complying | `skills/team-protocol/SKILL.md` §3 |
 | Runaway cost | Global and per-role caps, daily budget with reserve, `--max-turns`, wall-clock timeout, three-strikes blocking, kill switch | `quota.ts`, `orchestrator.ts` |
+| Built-in engine: guard | The engine runs the agent loop in the server process and calls the same `guardDecision` before every tool call, with the same `guard.json`. Without a readable guard file only read tools run. Unknown tool names are refused | `packages/server/src/engine/runner.ts` (e2e: `tests/e2e/engine.test.ts`) |
+| Built-in engine: API keys | The team's keys live in `~/.asf/keys.json` (mode 0600 where the OS supports it; on Windows, the user profile's permissions), never in a project folder. The guard refuses reads and writes of `keys.json` and `key-usage.json` (tools and shell), and shell access to `.asf/sessions`. Keys never enter an agent's environment (known provider key variables are stripped too); only the HTTP client puts a key in an `Authorization` header, and error texts are scrubbed of it. The API returns keys masked (last four characters), the key routes are owner-only, and `asf keys` refuses to run inside an agent run | `engine/keys.ts`, `engine/client.ts`, `guard.ts`, `orchestrator.ts` `envFor`, `api.ts` (tests: `keys-api.test.ts`, `engine.test.ts`) |
+| Built-in engine: providers | Requests go only to the providers the owner configured: their preset URL or the owner's own base URL. Free tiers may keep or train on prompts (Google states this for the Gemini free tier); the Keys screen and `docs/engine.md` say so | `core/engine/providers.ts` |
 
 ## Known limits
 
 * The guard pattern-matches shell commands; a determined agent could write files through an interpreter (`python -c`). The diff backstop at `task done` and orchestrator-only merges keep such writes out of `asf/integration`, but they can still change files inside the agent's own worktree.
 * Agents run as the owner's OS user. AI Software Factory is a policy sandbox, not an OS sandbox. For untrusted ideas, run AI Software Factory inside a VM or container.
 * `permission_mode: bypassPermissions` disables Claude Code's own permission prompts (the AI Software Factory guard hook still runs). It is an owner opt-in with a warning in Settings.
+* With the built-in engine, everything an agent reads (code, documents, command output) is sent to the chosen provider. A free tier's data terms are weaker than a paid plan's; do not use one for code or data you may not share.
+* Teammates' keys are pooled on one computer. Whoever runs AI Software Factory there can use every key (not read it: the dashboard and CLI only show the last four characters, but the file is readable by that OS user).

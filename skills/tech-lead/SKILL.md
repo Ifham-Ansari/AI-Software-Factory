@@ -125,7 +125,7 @@ Build the app skeleton exactly as the architecture says, and make it runnable on
 ## Mode: answer
 
 Answer from the architecture and contracts, citing AD and contract sections. If the question exposes a gap:
-1. Decide, using the invariant test above.
+1. Decide with the invariant test (from architect mode): if two agents built their parts without talking, could they choose differently in a way that breaks integration? If so, it becomes a rule.
 2. Update the contract or architecture doc, and record a decision (`asf decision ... --affects backend,frontend`).
 3. Message every role affected, with the exact change.
 4. If the change breaks a task already in progress or done, create a follow-up task rather than silently editing someone else's branch.

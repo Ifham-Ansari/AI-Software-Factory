@@ -2,6 +2,7 @@ import { MemoryScreen } from "./screens/Memory";
 import { NeedsYouScreen } from "./screens/NeedsYou";
 import { useEffect, useState } from "react";
 import { Shell, defaultScreen } from "./components/Shell";
+import { ScreenErrorBoundary } from "./components/ErrorBoundary";
 import { Toaster } from "./components/ui";
 import { useUnreadActions } from "./components/Notifications";
 import { getToken, setToken } from "./lib/api";
@@ -13,6 +14,7 @@ import { DesignScreen } from "./screens/Design";
 import { DocsScreen } from "./screens/Docs";
 import { FeedScreen } from "./screens/Feed";
 import { IdeaScreen } from "./screens/Idea";
+import { KeysScreen } from "./screens/Keys";
 import { PreviewScreen } from "./screens/Preview";
 import { ProjectsScreen } from "./screens/Projects";
 import { QuestionsScreen } from "./screens/Questions";
@@ -63,7 +65,9 @@ function ProjectRoute({ pid, screen, rest }: { pid: string; screen: string; rest
   return (
     <Shell pid={pid} screen={screen}>
       <div className="px-6 py-5 max-[1100px]:px-4">
-        <Screen pid={pid} screen={screen} rest={rest} />
+        <ScreenErrorBoundary resetKey={`${pid}/${screen}/${rest.join("/")}`}>
+          <Screen pid={pid} screen={screen} rest={rest} />
+        </ScreenErrorBoundary>
       </div>
     </Shell>
   );
@@ -95,6 +99,8 @@ function Screen({ pid, screen, rest }: { pid: string; screen: string; rest: stri
       return <MemoryScreen pid={pid} />;
     case "usage":
       return <UsageScreen pid={pid} />;
+    case "keys":
+      return <KeysScreen pid={pid} />;
     case "settings":
       return <SettingsScreen pid={pid} />;
     case "":

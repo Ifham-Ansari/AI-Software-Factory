@@ -1,9 +1,11 @@
 import {
+  taskLevel,
   budgetTokens,
   emptyUsage,
   formatId,
   lessonsFor,
   matchesAny,
+  parseTaskFile,
   PHASE_GATE,
   quotaCheck,
   roleCap,
@@ -73,6 +75,18 @@ const SCRATCH = [".asf/handoffs/**", ".asf/reviews/**", ".asf/screens/**"];
 /** Pause reason when Claude Code reports that it is not logged in (shown in the header and on Needs you). */
 const LOGGED_OUT = "Claude Code is not logged in";
 
+/**
+ * Why a run failed, in words the owner can act on: the status plus what the runner said (for example a provider's
+ * "request too large" or "model does not support tools"), instead of only "run failed".
+ */
+function failedWhy(run: { result?: { isError: boolean; text: string } }, status = "failed"): string {
+  const said = run.result?.isError ? run.result.text.replace(/\s+/g, " ").trim() : "";
+  return said ? `run ${status}: ${said.length > 300 ? `${said.slice(0, 299)}…` : said}` : `run ${status}`;
+}
+
+/** API keys of the built-in engine's providers: agents' shells never see them, even if the owner exported one. */
+const PROVIDER_KEY_VARS = /^(GROQ|GEMINI|GOOGLE|OPENROUTER|MISTRAL|CEREBRAS|OPENAI|TOGETHER|DEEPSEEK|FIREWORKS)_API_KEY$/i;
+
 export interface NeedsYouItem {
   kind: "question" | "approval" | "blocked" | "paused" | "alert" | "team-paused";
   id: string;
@@ -127,6 +141,10 @@ export class Orchestrator {
 
   start(): void {
     this.recover();
+    // The built-in engine forgets its keys' cooldowns on a restart, and keys or models may have changed meanwhile:
+    // try them again instead of waiting for the old reset time.
+    const until = this.svc.state.limitedUntil;
+    if (this.svc.settings.engine === "builtin" && until && until > Date.now()) this.retryNow("AI Software Factory restarted: trying the team's API keys again");
     const interval = this.svc.settings.scheduler_interval_ms;
     this.timer = setInterval(() => void this.tick(), interval);
     void this.tick();
@@ -286,7 +304,7 @@ export class Orchestrator {
     const a = this.svc.agent(agent)!;
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env))
-      if (v !== undefined && !k.startsWith("ASF_")) env[k] = v;
+      if (v !== undefined && !k.startsWith("ASF_") && !PROVIDER_KEY_VARS.test(k)) env[k] = v;
     // Agents get the asf CLI on PATH through per-project shims.
     const pathKey = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
     env[pathKey] = `${this.p.paths.bin}${path.delimiter}${env[pathKey] ?? ""}`;
@@ -346,10 +364,16 @@ export class Orchestrator {
       extra.push(`Branch to merge: \`${t.meta.mergeBranch}\``);
     let handoff: string | null = null;
     let stat: string | null = null;
+    let diff: string | null = null;
     if (stage === "review" || stage === "verify") {
       handoff = this.svc.handoffs(t.id).at(-1)?.content ?? null;
-      if (this.p.direct) stat = this.taskDiff(t).stat;
-      else if (t.base_sha) stat = await diffStat(ws.cwd, t.base_sha);
+      if (this.p.direct) {
+        // No git in the project folder: the reviewer gets the task's changes here (ASF keeps snapshots), or it
+        // spends its run looking for them (a review once tried git diff for 40 turns).
+        const d = this.taskDiff(t);
+        stat = d.stat;
+        if (stage === "review" && d.diff.length <= 30_000) diff = d.diff;
+      } else if (t.base_sha) stat = await diffStat(ws.cwd, t.base_sha);
       if (stage === "verify") {
         const rv = this.svc.reviews(t.id).at(-1);
         if (rv?.summary) extra.push(`## Review verdict\n\n${rv.verdict}: ${rv.summary}`);
@@ -366,6 +390,7 @@ export class Orchestrator {
           extra,
           handoff,
           diffStat: stat,
+          diff,
           agent,
           roleTitle: roleTitle(this.p.roles, role),
           lessons: lessonsFor(this.svc.lessons(), role, [...t.owns, ...t.may_touch]).map((l) => l.text),
@@ -419,10 +444,12 @@ export class Orchestrator {
     const sessionId = o.resumeSession ?? crypto.randomUUID();
     const skills = this.p.roles.roles[o.role]?.skills ?? ["team-protocol"];
     const systemFile = path.join(dir, "system.md");
-    fs.writeFileSync(
-      systemFile,
-      buildSystemPrompt({ roleTitle: roleTitle(this.p.roles, o.role), project: this.p.paths.name, skills, skillsDir: this.p.skillsDir(), direct: this.p.direct }),
-    );
+    // Only this run's mode of each skill: the others would be resent with every request for nothing.
+    const sys = { roleTitle: roleTitle(this.p.roles, o.role), project: this.p.paths.name, skills, skillsDir: this.p.skillsDir(), direct: this.p.direct, mode: o.mode };
+    fs.writeFileSync(systemFile, buildSystemPrompt(sys));
+    // The built-in engine sends this instead when a model's per-request limit is smaller than the skills.
+    const leanSystemFile = path.join(dir, "system-lean.md");
+    fs.writeFileSync(leanSystemFile, buildSystemPrompt({ ...sys, lean: true }));
     fs.writeFileSync(path.join(dir, "prompt.md"), o.prompt);
     const a = this.svc.agent(o.agent)!;
     const guardFile = path.join(dir, "guard.json");
@@ -534,6 +561,15 @@ export class Orchestrator {
     }
     // Routine runs get a cheaper model and a tighter turn limit unless the owner set one for the role.
     const maxTurns = settings.max_turns[o.role] ?? Math.min(MODE_MAX_TURNS[o.mode] ?? settings.default_max_turns, settings.default_max_turns);
+    // How demanding the run is: the built-in engine sends light work to small models and complex work to the
+    // strongest (plain code: mode, task size, earlier failures, stakes).
+    const level = taskLevel({
+      mode: o.mode,
+      stage: o.stage === "planning" || o.stage === "answer" ? "implement" : o.stage,
+      size: o.task.size,
+      failures: o.task.run_failures,
+      stakes: this.svc.state.idea?.stakes ?? null,
+    });
     const model = settings.models[o.role] || MODE_MODEL[o.mode];
     const { pid } = this.p.runner.start(
       {
@@ -544,6 +580,7 @@ export class Orchestrator {
         resume: Boolean(o.resumeSession),
         prompt: o.prompt,
         systemFile,
+        leanSystemFile,
         settingsFile,
         streamFile: path.join(dir, "stream.jsonl"),
         maxTurns,
@@ -552,6 +589,9 @@ export class Orchestrator {
         allowedTools: settings.allowed_tools,
         disallowedTools: settings.disallowed_tools,
         timeoutMs: settings.run_timeout_minutes * 60_000,
+        tier: level === "light" ? "fast" : "strong",
+        level,
+        sessionsDir: path.join(this.p.paths.asf, "sessions"),
       },
       {
         onEvent: (ev) => this.onStream(run, ev),
@@ -564,7 +604,7 @@ export class Orchestrator {
     this.svc.emit(
       "run.started",
       `${o.agent} started ${o.task.kind === "planning" ? `${o.mode}` : `${o.stage} on ${o.task.id}`}${o.resumeSession ? " (resumed)" : ""}`,
-      { stage: o.stage, mode: o.mode, resume: Boolean(o.resumeSession), session: sessionId },
+      { stage: o.stage, mode: o.mode, resume: Boolean(o.resumeSession), session: sessionId, level },
       { actor: o.agent, role: o.role, task: o.task.id, run: runId },
     );
     return runId;
@@ -699,7 +739,7 @@ export class Orchestrator {
         current_run: null,
         current_task: null,
         status: "idle",
-        last_action: status === "auth_failed" ? `Stopped: ${LOGGED_OUT}` : `Finished (${status})`,
+        last_action: status === "auth_failed" ? `Stopped: ${this.authHelp().reason}` : `Finished (${status})`,
       });
     const meta = { actor: run.agent, role: run.role, task: run.task, run: run.runId };
     this.svc.emit(
@@ -724,7 +764,7 @@ export class Orchestrator {
       this.svc.patchState({ limitedUntil: until });
       this.svc.emit(
         "quota.limit",
-        `Claude Code usage limit reached; AI Software Factory paused until ${new Date(until).toLocaleTimeString()}`,
+        `Usage limit reached; AI Software Factory paused until ${new Date(until).toLocaleTimeString()}`,
         { resetsAt: until },
         meta,
       );
@@ -742,6 +782,8 @@ export class Orchestrator {
     if (!run.task) return;
     const t = this.svc.task(run.task);
     if (!t) return;
+    // Closed while it ran (superseded by the owner's decision, or cancelled): there is nothing to hand on.
+    if (t.status === "done" && t.hold === "cancelled") return;
     const ok = status === "success";
     try {
       if (t.kind === "planning") await this.afterPlanningRun(t, run, ok);
@@ -761,12 +803,21 @@ export class Orchestrator {
       else if (this.svc.task(run.task)?.session_id === run.sessionId) this.svc.updateTask(run.task, { session_id: null });
     }
     const st = this.svc.state;
+    const help = this.authHelp();
     // Several runs can fail at once: pause and alert only once.
-    if (st.paused && st.pauseReason === LOGGED_OUT) return;
-    this.svc.patchState({ paused: true, pauseReason: LOGGED_OUT });
-    this.svc.emit("project.paused", `Scheduler paused: ${LOGGED_OUT}`, { reason: "auth" }, { actor: run.agent, role: run.role, task: run.task, run: run.runId });
-    this.svc.alert(
-      `Claude Code is not logged in, so no agent can work. Run \`claude\` in a terminal, type /login and sign in, then click Resume. Claude Code said: "${run.result?.text || "authentication failed"}"`,
+    if (st.paused && st.pauseReason === help.reason) return;
+    this.svc.patchState({ paused: true, pauseReason: help.reason });
+    this.svc.emit("project.paused", `Scheduler paused: ${help.reason}`, { reason: "auth" }, { actor: run.agent, role: run.role, task: run.task, run: run.runId });
+    this.svc.alert(`${help.alert} Details: "${run.result?.text || "authentication failed"}"`);
+  }
+
+  /** The runner's own words for a login failure (Claude Code login, or the built-in engine's API keys). */
+  private authHelp(): { reason: string; alert: string } {
+    return (
+      this.p.runner.authHelp?.() ?? {
+        reason: LOGGED_OUT,
+        alert: "Claude Code is not logged in, so no agent can work. Run `claude` in a terminal, type /login and sign in, then click Resume.",
+      }
     );
   }
 
@@ -804,7 +855,7 @@ export class Orchestrator {
       this.failRun(
         t,
         run,
-        ok ? "run ended without `asf task done` or `asf task block`" : `run ${status}`,
+        ok ? "run ended without `asf task done` or `asf task block`" : failedWhy(run, status),
         "Your previous run ended before the task was finished: `asf task done` was not called, or it was refused. Check `asf task show $ASF_TASK` and `git status`, finish the work, and hand off with `asf task done`.",
       );
     } else if (run.stage === "review") {
@@ -918,7 +969,7 @@ export class Orchestrator {
     this.failRun(
       t,
       run,
-      ok ? `run ended without the expected output (${expected[t.mode ?? ""] ?? "?"})` : "run failed",
+      ok ? `run ended without the expected output (${expected[t.mode ?? ""] ?? "?"})` : failedWhy(run),
       `Your run ended before you finished. You still need to ${expected[t.mode ?? ""] ?? "finish your mode"}.`,
     );
   }
@@ -1041,16 +1092,58 @@ export class Orchestrator {
   /** Owner's "cancel current work": stop agents and close everything in flight, keeping finished work. */
   async cancelCurrentWork(): Promise<void> {
     await this.killAll();
+    const cancelled = new Set<string>();
     for (const t of this.svc.tasks()) {
       if (t.status === "done") continue;
       this.svc.setStatus(t.id, "done", { force: true, reason: "cancelled by the owner", extra: { hold: "cancelled" } });
+      cancelled.add(t.id);
     }
+    // Their task files go to .asf/tasks/cancelled/, so the next plan starts from a clean folder (the ids stay taken).
+    this.shelveTaskFiles(cancelled);
+    await this.commitIntegration("Cancelled the current work");
     for (const q of this.svc.questions("open")) this.svc.markAnswered(q.id, "(cancelled by the owner)", "human");
     const ch = this.activeChange();
     if (ch) this.setChange(ch.id, "cancelled");
     this.svc.patchState({ paused: false, pauseReason: null, track: null });
     this.svc.setPhase("idea");
     this.svc.emit("project.cancelled", "Owner cancelled the current work. Finished work is kept; send a new request when you are ready.", {}, { actor: "human" });
+  }
+
+  /**
+   * Close the planning tasks still working on a document the owner just approved, stopping their runs (a second
+   * revision once kept editing the approved plan's task files during the build). The task that submitted the
+   * approved version is left to finish: its output still has to be merged. The task is closed first, so the stopped
+   * run is not handled as a failure (see the run-end handler).
+   */
+  private async closeOpenPlanning(doc: string, version: number, why: string): Promise<void> {
+    const modes: Record<string, string[]> = { prd: ["draft", "revise", "change"], design: ["screens"], architecture: ["architect"], plan: ["plan", "replan"] };
+    for (const t of this.svc.tasks({ kind: ["planning"] })) {
+      // Only work still in progress: a task in "review" has finished and its document is being merged (cancelling
+      // it then lost the merge).
+      if (!["todo", "ready", "in_progress", "blocked"].includes(t.status) || !t.mode || !(modes[doc] ?? []).includes(t.mode)) continue;
+      if (t.meta.submitted?.doc === doc && t.meta.submitted.version === version) continue;
+      this.svc.setStatus(t.id, "done", { force: true, reason: why, extra: { hold: "cancelled" } });
+      const run = [...this.active.values()].find((r) => r.task === t.id);
+      if (run) await this.p.runner.kill(run.runId);
+    }
+  }
+
+  /** Move the task files of these tasks out of `.asf/tasks/` (into `cancelled/`, which plans do not read). */
+  private shelveTaskFiles(ids: Set<string>): void {
+    if (!ids.size) return;
+    const dir = path.join(this.p.sharedDir(), ".asf", "tasks");
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+    } catch {
+      return;
+    }
+    for (const f of files) {
+      const id = parseTaskFile(fs.readFileSync(path.join(dir, f), "utf8"), f).task?.id;
+      if (!id || !ids.has(id)) continue;
+      fs.mkdirSync(path.join(dir, "cancelled"), { recursive: true });
+      fs.renameSync(path.join(dir, f), path.join(dir, "cancelled", f));
+    }
   }
 
   private saveAttachments(dir: string, list: { name: string; data: string }[]): string[] {
@@ -1115,6 +1208,9 @@ export class Orchestrator {
     const doc = gate === "design_direction" ? null : gate;
     const d = doc ? this.svc.doc(doc) : null;
     if (doc && !d) throw new Error(`nothing submitted for ${gate} yet`);
+    // Nothing is left to do on an approved document: a revision still running would keep editing it (it once
+    // edited the approved plan's task files during the build).
+    if (doc) await this.closeOpenPlanning(doc, d!.version, `superseded: the owner approved ${doc} v${d!.version}`);
     if (doc) this.svc.setDocStatus(doc, "approved", comment, actor);
     this.svc.recordApproval(gate, doc, d?.version ?? null, "approved", comment);
     if (via === "change") {
@@ -1228,8 +1324,10 @@ export class Orchestrator {
           role: "tech-lead",
           status: "ready",
           priority: 0,
-          owns: [],
-          body: `The owner did not approve the release.\n\n${note}\n\nTriage: fix what is mechanical within this task, and create tasks for the owning roles for the rest (message the tech lead team).`,
+          // The fixes can be anywhere in the app: with no files of its own, this task could change nothing (it
+          // once asked itself for help instead).
+          owns: ["**"],
+          body: `The owner did not approve the release.\n\n${note}\n\nFix exactly what the owner asked, in the project's files (this task may change any of them). Keep the changes to what the comments need, check the result (run the project's checks, or open the pages), write your handoff, and finish with \`asf task done\`. The release is reviewed again after this.`,
           verify: this.svc.settings.checks.join(" && ") || "true",
         });
         break;
@@ -1287,6 +1385,21 @@ export class Orchestrator {
     }
     for (const a of st.alerts ?? []) items.push({ kind: "alert", id: `alert:${a.id}`, title: a.text, detail: "", task: a.task ?? null, screen: "board", at: a.ts, action: "dismiss" });
     if (st.paused) items.push({ kind: "team-paused", id: "paused", title: "The team is paused", detail: st.pauseReason ?? "", screen: "agents", at: new Date().toISOString(), action: "resume" });
+    else if (st.limitedUntil && st.limitedUntil > Date.now()) {
+      const at = new Date(st.limitedUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      items.push({
+        kind: "team-paused",
+        id: "limited",
+        title: `Agents are waiting for usage limits to reset (${at})`,
+        detail:
+          this.svc.settings.engine === "builtin"
+            ? `Every API key the agents can use has reached its limit. They carry on by themselves at ${at}. Add a key from another provider (it is tried at once), or click Resume team to try now.`
+            : `Claude Code reported a usage limit. The agents carry on by themselves at ${at}, or click Resume team to try now.`,
+        screen: "keys",
+        at: new Date().toISOString(),
+        action: "resume",
+      });
+    }
     const order: Record<string, number> = { approval: 0, question: 1, blocked: 2, "team-paused": 3, paused: 4, alert: 5 };
     return items.sort((a, b) => order[a.kind]! - order[b.kind]! || String(b.at).localeCompare(String(a.at)));
   }
@@ -1465,7 +1578,7 @@ export class Orchestrator {
         return;
       }
     }
-    this.failRun(t, run, ok ? "run ended without `asf reply`" : "run failed", `You have not replied to ${open.join(", ")} yet. Reply with \`asf reply <id> "..."\`.`);
+    this.failRun(t, run, ok ? "run ended without `asf reply`" : failedWhy(run), `You have not replied to ${open.join(", ")} yet. Reply with \`asf reply <id> "..."\`.`);
   }
 
   // ------------------------------------------------------------------------------------- merging
@@ -1785,18 +1898,19 @@ export class Orchestrator {
 
   async submitReleaseSummary(): Promise<void> {
     if (this.svc.doc("release")?.status === "submitted") return;
-    const tasks = this.svc.tasks({ kind: ["build", "integrate", "release"] });
-    const integ = this.p.sharedDir();
-    const log = this.p.direct
-      ? tasks.filter((x) => x.status === "done").map((x) => `${x.id} ${x.title}`).join("\n")
-      : (await git(integ, ["log", "--oneline", "-n", "40"], { reject: false })).stdout;
+    // Cancelled work was not built; the latest release QA round has the report that counts.
+    const tasks = this.svc.tasks({ kind: ["build", "integrate", "release"] }).filter((x) => x.status === "done" && x.hold !== "cancelled");
+    const log = this.p.direct ? null : (await git(this.p.sharedDir(), ["log", "--oneline", "-n", "40"], { reject: false })).stdout;
     const t1 = this.svc.handoffs("T001").at(-1)?.content ?? this.svc.handoffs("T000").at(-1)?.content ?? "";
-    const qa = this.svc.qaReports("REL-QA").at(-1)?.content ?? "";
+    const qa = tasks.filter((x) => x.kind === "release").map((x) => this.svc.qaReports(x.id).at(-1)?.content ?? "").filter(Boolean).at(-1) ?? "";
     const usage = this.svc.usage(30);
+    const built = tasks.filter((x) => x.kind === "build").length;
     const md = [
       `# Release summary: ${this.p.paths.name}`,
       "",
-      `AI Software Factory built ${tasks.filter((x) => x.kind === "build").length} tasks on the \`asf/integration\` branch. Approve to finish; then merge \`asf/integration\` into your main branch yourself when you are ready (AI Software Factory never does).`,
+      this.p.direct
+        ? `AI Software Factory built ${built} tasks, and everything is already in your project folder (${this.p.paths.root}). Approve to finish.`
+        : `AI Software Factory built ${built} tasks on the \`asf/integration\` branch. Approve to finish; then merge \`asf/integration\` into your main branch yourself when you are ready (AI Software Factory never does).`,
       "",
       "## What was built",
       "",
@@ -1812,12 +1926,7 @@ export class Orchestrator {
       "",
       qa || "(no report)",
       "",
-      "## Recent commits",
-      "",
-      "```",
-      log,
-      "```",
-      "",
+      ...(log ? ["## Recent commits", "", "```", log, "```", ""] : []),
       `## Usage\n\nBudget tokens used in the last 30 days: ${usage.byDay.reduce((a, d) => a + (d.tokens ?? 0), 0).toLocaleString()}.`,
     ].join("\n");
     this.svc.submitDoc("release", ".asf/docs/release.md", md, "orchestrator", null);
@@ -1837,8 +1946,24 @@ export class Orchestrator {
     this.svc.emit("project.paused", `Scheduler paused: ${reason}`, {}, { actor: "human" });
   }
 
+  /**
+   * Stop waiting for a usage limit (or a key problem) now: a key was added or fixed, the server restarted, or the
+   * owner clicked Try now. An owner's own pause stays.
+   */
+  retryNow(why: string): void {
+    const st = this.svc.state;
+    const waiting = Boolean(st.limitedUntil && st.limitedUntil > Date.now());
+    const keyPause = st.paused && st.pauseReason === this.authHelp().reason;
+    if (!waiting && !keyPause) return;
+    this.svc.patchState({ limitedUntil: null, ...(keyPause ? { paused: false, pauseReason: null } : {}) });
+    this.p.runner.reset?.();
+    this.svc.emit("quota.resumed", why, {}, { actor: "human" });
+    void this.tick();
+  }
+
   resume(): void {
     this.svc.patchState({ paused: false, pauseReason: null, limitedUntil: null });
+    this.p.runner.reset?.();
     for (const t of this.svc.tasks())
       if (t.hold === "killed" || t.hold === "error") this.svc.updateTask(t.id, { hold: null });
     this.svc.emit("project.resumed", "Scheduler resumed", {}, { actor: "human" });

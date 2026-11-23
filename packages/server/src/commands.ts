@@ -5,9 +5,11 @@ import {
   docOwners,
   isRole,
   matchesAny,
+  normalizeBatch,
   planStats,
   SEVERITIES,
   type Action,
+  type Batch,
   type DoneStatus,
   type Identity,
   type Role,
@@ -22,6 +24,24 @@ import { walkFiles } from "./snapshot.ts";
 
 // Semantics of every agent command in skills/team-protocol/references/asf-cli.md. The CLI is a thin client:
 // it reads scratch files locally and sends their content; all checks and state changes happen here.
+
+/** Shown with plan problems about unreadable task files or missing fields (see skills/tech-lead/templates/task.md). */
+const TASK_FILE_FORMAT = [
+  "How a task file looks: one Markdown file per task, .asf/tasks/<ID>.md (only .md files are read), starting with a",
+  "YAML header between --- lines. owns and verify are required:",
+  "---",
+  "id: T001",
+  "title: Home page",
+  "role: frontend",
+  "after: [T000]                      # tasks that must be done first",
+  "owns: [frontend/src/app/page.tsx, frontend/src/app/page.test.tsx]   # files only this task changes",
+  "may_touch: []",
+  'verify: "cd frontend && pnpm test page"   # a command that passes when the task is done',
+  "size: S                            # S, M, or L",
+  "---",
+  "## Goal",
+  "…",
+].join("\n");
 
 export interface CmdResult {
   text: string;
@@ -75,6 +95,12 @@ export class Commands {
   private must(id: Identity, action: Action, ctx: { task?: string; doc?: string } = {}): void {
     const d = authorize(id, action, ctx);
     if (!d.ok) throw new ServiceError(d.reason ?? "not allowed", 3);
+  }
+
+  /** Remember which planning task submitted a document version (see the orchestrator's closeOpenPlanning). */
+  private noteSubmitted(id: Identity, doc: string, version: number): void {
+    const tid = this.runTask(id);
+    if (tid && this.svc.task(tid)?.kind === "planning") this.svc.patchMeta(tid, { submitted: { doc, version } });
   }
 
   private actor(id: Identity): { agent: string; role: string | null } {
@@ -307,15 +333,24 @@ export class Commands {
     this.must(id, "ask");
     this.checkAddress(to);
     if (to === "@team") throw new ServiceError("ask a specific role or @human, not @team", 2);
+    // Asking yourself only pauses your task until you answer yourself (a tech lead once did, when blocked).
+    const me = this.actor(id);
+    const sameRole = me.role ? this.svc.agents().filter((x) => x.role === me.role) : [];
+    if (to === `@${me.agent}` || (me.role && to === `@${me.role}` && sameRole.length <= 1))
+      throw new ServiceError(
+        `${to} is you. Decide it yourself (you have the authority for your role's questions), or ask @human if it is the owner's call. If something blocks you (the guard, a missing file), say so in your handoff or ask @human.`,
+        2,
+      );
     const taskId = this.runTask(id);
     const t = taskId ? this.svc.task(taskId) : null;
     if (batch) {
-      const qs = (batch as any)?.questions;
-      if (!Array.isArray(qs) || qs.length === 0) throw new ServiceError("batch file must be JSON with a non-empty \"questions\" array (see product-manager references/discovery.md)", 2);
-      for (const q of qs) {
-        if (!q.id || !q.question) throw new ServiceError("every batch question needs \"id\" and \"question\"", 2);
-      }
-      const intro = String((batch as any).intro ?? `${qs.length} questions`);
+      // Models write batches in several shapes; store the one shape the dashboard reads.
+      const raw = batch;
+      batch = normalizeBatch(raw);
+      const qs = (batch as Batch).questions;
+      if (qs.length === 0) throw new ServiceError("batch file must be JSON with a non-empty \"questions\" array, each with \"id\" and \"question\" (see product-manager references/discovery.md)", 2);
+      if (Array.isArray((raw as any)?.questions) && (raw as any).questions.length !== qs.length) throw new ServiceError("every batch question needs a \"question\" text", 2);
+      const intro = String((batch as Batch).intro ?? `${qs.length} questions`);
       const r = this.blockWithQuestion(id, t, to, intro, "batch", batch);
       // Design-direction gate off: take the designer's recommendation without waiting.
       if (t?.kind === "planning" && t.mode === "direction" && !this.p.orch.gateEnabled("design_direction")) {
@@ -438,6 +473,7 @@ export class Commands {
     if (!content.trim()) throw new ServiceError(`${file ?? docPath(name)} is empty`, 2);
     const a = this.actor(id);
     const v = this.svc.submitDoc(name, file ?? docPath(name), content, a.agent, a.role ?? docOwners(name)?.[0] ?? null);
+    this.noteSubmitted(id, name, v);
     await this.p.orch.onDocSubmitted(name);
     return { text: `${name} v${v} submitted for approval`, data: { name, version: v } };
   }
@@ -448,9 +484,37 @@ export class Commands {
     this.must(id, "read");
     const repoFiles = await this.projectFiles();
     const r = checkPlan(files, repoFiles);
+    // Tasks that already ran are history (their files cannot change), so the rule about .asf/ paths is for new ones.
+    const ran = (tid: string) => (this.svc.task(tid)?.status ?? "todo") !== "todo";
+    r.problems = r.problems.filter((p) => !(p.code === "asf_path" && p.tasks.every(ran)));
+    // An id that a started or finished task already has cannot be reused for different work (the import would refuse
+    // it): say so now, with the next free id, instead of at submit.
+    const norm = (s: string | undefined) => (s ?? "").replace(/\r\n/g, "\n").trim();
+    const numbers = [...this.svc.tasks({ kind: ["build"] }).map((t) => t.id), ...r.tasks.map((t) => t.id)].map((x) => Number(/^T(\d+)$/.exec(x)?.[1] ?? -1));
+    let next = Math.max(0, ...numbers) + 1;
+    for (const t of r.tasks) {
+      const had = this.svc.task(t.id);
+      if (!had || had.kind !== "build" || had.status === "todo" || norm(had.source) === norm(t.source)) continue;
+      const free = `T${String(next++).padStart(3, "0")}`;
+      r.problems.push({
+        code: "id_taken",
+        tasks: [t.id],
+        message: `${t.id} is already the id of "${had.title}" (${had.hold === "cancelled" ? "cancelled" : had.status}), so it cannot be reused for different work. Give this task a new id, for example ${free} (change \`id:\` and any \`after:\` that points to it).`,
+      });
+    }
+    r.ok = r.problems.length === 0;
     const stats = r.tasks.length ? planStats(r.tasks) : null;
     if (!r.ok) {
-      return { exit: 1, text: `Plan has ${r.problems.length} problem(s):\n${r.problems.map((p) => `  [${p.code}] ${p.message}`).join("\n")}`, data: { ok: false, problems: r.problems } };
+      // A file the parser cannot read, or one missing fields, usually means the format is unknown to the agent:
+      // show it right here instead of leaving the agent to guess (smaller models otherwise repeat the same mistake).
+      const formatHelp = r.problems.some((p) => p.code === "parse" || p.code === "missing_field")
+        ? `\n\n${TASK_FILE_FORMAT}\nFull template with every section: ${this.p.skillsDir().replace(/\\/g, "/")}/tech-lead/templates/task.md`
+        : "";
+      return {
+        exit: 1,
+        text: `Plan has ${r.problems.length} problem(s):\n${r.problems.map((p) => `  [${p.code}] ${p.message}`).join("\n")}${formatHelp}`,
+        data: { ok: false, problems: r.problems },
+      };
     }
     return {
       text: `Plan OK: ${r.tasks.length} tasks, critical path ${stats!.criticalPath.join(" -> ")}, peak ${stats!.peakLanes} parallel lanes.`,
@@ -469,7 +533,7 @@ export class Commands {
     const stats = planStats(r.tasks);
     const list = r.tasks.map((t) => `| ${t.id} | ${t.title.replace(/\|/g, "/")} | ${t.role} | ${t.size} | ${t.after.join(", ") || "-"} |`).join("\n");
     const content = `${summary?.trim() || "# Plan summary"}\n\n## Tasks (validated)\n\n| ID | Title | Role | Size | After |\n|---|---|---|---|---|\n${list}\n\nCritical path: ${stats.criticalPath.join(" → ")}. Peak parallel lanes: ${stats.peakLanes}.\n`;
-    this.svc.submitDoc("plan", ".asf/docs/plan-summary.md", content, a.agent, "tech-lead");
+    this.noteSubmitted(id, "plan", this.svc.submitDoc("plan", ".asf/docs/plan-summary.md", content, a.agent, "tech-lead"));
     await this.p.orch.onDocSubmitted("plan");
     return { text: `${check.text}\nImported ${r.tasks.length} tasks. Build tasks stay todo until the owner approves the plan.`, data: { ok: true, stats } };
   }

@@ -23,11 +23,11 @@ flowchart LR
 
 | Package | Responsibility |
 |---|---|
-| `packages/core` | Pure, heavily tested logic: domain types, settings schema, roles.yaml parsing, task-file parsing, plan validation (required fields, unknown `after`, cycles, one role, conservative glob collisions), plan stats (critical path, peak lanes), scheduler decisions, task status transitions, phase machine, permission matrix, guard decisions, stream-json parsing, quota decisions, SQLite schema + migrations |
+| `packages/core` | Pure, heavily tested logic: domain types, settings schema, roles.yaml parsing, task-file parsing, plan validation (required fields, unknown `after`, cycles, one role, conservative glob collisions), plan stats (critical path, peak lanes), scheduler decisions, task status transitions, phase machine, permission matrix, guard decisions, stream-json parsing, quota decisions, SQLite schema + migrations, and for the built-in engine (`engine/`) tool schemas, provider error and rate-limit parsing, key selection, and conversation trimming |
 | `packages/server` | Fastify API, WebSocket event bus, service layer, orchestrator loop, agent runner (`claude` CLI), git/worktree manager, port allocator, prompt assembly, `asf init` logic |
 | `packages/cli` | The `asf` binary: owner commands (`init`, `doctor`, `up`, `status`, `pause`, `resume`, `stop`, `logs`) and agent commands (`skills/team-protocol/references/asf-cli.md`), plus `hook pre-tool-use` |
 | `packages/dashboard` | React + Vite + Tailwind v4 app, built to static files the server serves |
-| `packages/fake-claude` | Test double for `claude`: same flags, realistic stream-json, runs hooks from `--settings`, acts out scenario files |
+| `packages/fake-claude` | Test doubles. `main.ts` stands in for `claude`: same flags, realistic stream-json, runs hooks from `--settings`, acts out scenario files. `llm.ts` (fake-llm) is a scripted OpenAI-compatible server that acts out the same scenarios for the built-in engine |
 
 TypeScript runs directly on Node ≥ 22.18 through type stripping (`erasableSyntaxOnly`), so there is no build step for the server, CLI, or tests; only the dashboard is built. See `docs/decisions/0002-no-build-typescript.md`.
 
@@ -44,6 +44,9 @@ In the owner's project (`asf init <path>`):
 | `../.asf-worktrees/<project>/_integration` | worktree of `asf/integration` | Shared truth for agents: `.asf/skills/`, `.asf/docs/` (PRD, architecture, contracts, design, decisions), `.asf/tasks/` |
 | `../.asf-worktrees/<project>/<agent>-<task>` | task branch `asf/<id>-<slug>` | One per task, reused across review rounds and resumes, removed after merge |
 | `.asf/handoffs/`, `.asf/reviews/`, `.asf/screens/` | no (scratch) | Read by the CLI and stored in the DB |
+| `.asf/sessions/<session>.json` | no | Built-in engine conversations, for resuming (agents cannot read them) |
+
+Per computer, in `~/.asf/`: the project registry and server info, and for the built-in engine the team's API keys (`keys.json`) and their daily usage (`key-usage.json`). Agents can never read either file.
 
 The owner's own branch is never modified. AI Software Factory only commits to `asf/integration` and task branches; the owner decides when to merge `asf/integration`.
 
@@ -79,7 +82,7 @@ The scheduler (`schedule()` in core) runs every couple of seconds and on events.
 
 ## Quota guard
 
-Usage comes from `result` events (input + output + cache-creation tokens count against the budget; cache reads are tracked but not counted). AI Software Factory starts runs only while today's usage is under `(100 − reserve)%` of the daily budget (default 80% of 10M tokens) and caps concurrency (default 3). A usage-limit error pauses scheduling until the reset time and resumes automatically. The plan screen shows an estimate: tasks by role × average run cost by role (history first, then defaults), plus review and QA runs.
+Usage comes from `result` events (input + output + cache-creation tokens count against the budget; cache reads are tracked but not counted). AI Software Factory starts runs only while today's usage is under `(100 − reserve)%` of the daily budget (default 80% of 10M tokens) and caps concurrency (default 3). A usage-limit error pauses scheduling until the reset time and resumes automatically. The plan screen shows an estimate: tasks by role × average run cost by role (history first, then defaults), plus review and QA runs. With the built-in engine it also shows the estimated API requests (runs × average turns), since free tiers limit requests per day; when every key is rate limited, the engine ends the run as a usage limit with the earliest key reset, so the same pause and auto-resume apply. The header shows the wait with **Try now**; for the built-in engine it also ends at once when a key is added or passes a test, and when the server restarts (`Orchestrator.retryNow`). Interrupted work resumes its own conversation, and the engine's resume prompt carries a summary of what the run already did, so agents do not start over.
 
 ## Runaway guards and the kill switch
 
@@ -87,4 +90,13 @@ Usage comes from `result` events (input + output + cache-creation tokens count a
 
 ## Agent runner interface
 
-`AgentRunner` (`start`, `kill`, `killAll`, `active`) hides the CLI. `ClaudeRunner` is the only implementation; another agent CLI can be added behind the same interface later.
+`AgentRunner` (`start`, `kill`, `killAll`, `active`, and optional `authHelp` and `reset`) hides what runs an agent. There are two implementations, and `RunnerRouter` picks one per run from the project's `engine` setting:
+
+* **`ClaudeRunner`** starts `claude -p` (see `docs/claude-code-integration.md`).
+* **`EngineRunner`** (the built-in engine, `packages/server/src/engine/`) runs the agent loop in the server process against OpenAI-compatible APIs, on the team's own keys (free tiers or local models).
+  * It writes the same stream-json as `claude -p`, and its tools use Claude Code's names, so everything downstream works unchanged.
+  * It calls the guard in-process before every tool call.
+  * It keeps each conversation in `.asf/sessions/` for resuming.
+  * Before each request it picks a key with `pickKey` (core). A rate-limited key cools down and the conversation continues on another key or model.
+
+See `docs/engine.md` and `docs/decisions/0014-builtin-engine.md`.

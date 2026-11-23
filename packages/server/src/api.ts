@@ -1,10 +1,14 @@
-import { estimateBuild, GATES, parseStreamLine, planStats, quotaCheck, settingsSchema, type Gate, type Identity } from "@asf/core";
+import { estimateBuild, GATES, parseStreamLine, planStats, PROVIDERS, quotaCheck, settingsSchema, type Gate, type Identity } from "@asf/core";
+import { execa } from "execa";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import type { CmdResult } from "./commands.ts";
+import { catalogFor } from "./engine/catalog.ts";
+import { listModels } from "./engine/client.ts";
+import { resolveBin } from "./runner.ts";
 import { commitAll, git } from "./git.ts";
 import { SKILLS_SOURCE } from "./paths.ts";
 import type { Project } from "./project.ts";
@@ -19,6 +23,17 @@ function bearer(req: FastifyRequest): string | undefined {
   const h = req.headers.authorization;
   if (h?.startsWith("Bearer ")) return h.slice(7);
   return undefined;
+}
+
+let claudeCheck: { at: number; found: boolean } | null = null;
+
+/** Whether the `claude` CLI is installed (checked at most once a minute), so the dashboard can suggest the built-in engine. */
+async function claudeInstalled(): Promise<boolean> {
+  if (claudeCheck && Date.now() - claudeCheck.at < 60_000) return claudeCheck.found;
+  const { file, prefix } = resolveBin(process.env.ASF_CLAUDE_BIN ?? "claude");
+  const r = await execa(file, [...prefix, "--version"], { reject: false, timeout: 10_000, windowsHide: true, stdin: "ignore" }).catch(() => null);
+  claudeCheck = { at: Date.now(), found: Boolean(r && r.exitCode === 0) };
+  return claudeCheck.found;
 }
 
 function sendError(reply: FastifyReply, e: unknown) {
@@ -184,6 +199,73 @@ export function registerApi(app: FastifyInstance, srv: AsfServer): void {
     }),
   );
 
+  // -------------------------------------------------------- built-in engine: the team's API keys (owner only)
+  // Keys live on this computer (~/.asf/keys.json). Responses never contain a key: only its last four characters.
+  const catalog = catalogFor(srv.keys);
+  /** Projects on the built-in engine that wait for a usage limit (or a key) try again now. */
+  const retryWaitingProjects = (why: string) => {
+    for (const p of srv.projects.values()) if (p.svc.settings.engine === "builtin") p.orch.retryNow(why);
+  };
+  app.get(
+    "/api/engine",
+    wrap(async (req) => {
+      human(req);
+      // Model lists are cached for hours; this only fetches for a new key or an old list.
+      await catalog.refresh().catch(() => {});
+      return { providers: PROVIDERS, keys: srv.keys.views(), models: catalog.list(), routes: catalog.routes(), claudeFound: await claudeInstalled() };
+    }),
+  );
+  app.post(
+    "/api/keys",
+    wrap(async (req) => {
+      human(req);
+      const b = z.object({ provider: z.string().min(1), label: z.string().min(1).max(60), key: z.string().max(500).default(""), baseUrl: z.string().max(300).optional() }).parse(req.body);
+      if (b.baseUrl && !/^https?:\/\//i.test(b.baseUrl)) throw new ServiceError("the base URL must start with http:// or https://", 2);
+      const k = srv.keys.add(b);
+      // Read the new key's models now, so its best model is picked before the next run, and let projects that are
+      // waiting for a usage limit try again with it at once.
+      await catalog.refresh(true).catch(() => {});
+      retryWaitingProjects(`${k.label}'s ${k.provider} key was added: trying again`);
+      return srv.keys.views().find((v) => v.id === k.id);
+    }),
+  );
+  app.delete(
+    "/api/keys/:id",
+    wrap((req) => {
+      human(req);
+      if (!srv.keys.remove((req.params as { id: string }).id)) throw new ServiceError("no such key", 404);
+      return { ok: true };
+    }),
+  );
+  app.post(
+    "/api/keys/:id/test",
+    wrap(async (req) => {
+      human(req);
+      const k = srv.keys.get((req.params as { id: string }).id);
+      if (!k) throw new ServiceError("no such key", 404);
+      // GET /models costs no tokens.
+      const r = await listModels(srv.keys.baseUrl(k), k.key);
+      if (r.ok) {
+        if (k.invalid) srv.keys.setInvalid(k.id, null);
+        await catalog.refresh(true).catch(() => {});
+        retryWaitingProjects(`${k.label}'s ${k.provider} key works: trying again`);
+        const group = k.provider === "custom" ? k.id : k.provider;
+        return { ok: true, models: r.models.length, best: catalog.list().find((p) => p.provider === group)?.best ?? null };
+      }
+      if (r.error.kind === "auth") srv.keys.setInvalid(k.id, r.error.message);
+      return { ok: false, error: r.error.message };
+    }),
+  );
+  /** Models each provider with a key offers (usable ones, best first), for the model pickers in Settings. */
+  app.get(
+    "/api/engine/models",
+    wrap(async (req) => {
+      human(req);
+      await catalog.refresh().catch(() => {});
+      return catalog.list();
+    }),
+  );
+
   // ------------------------------------------------------------------------- agent CLI commands
   app.post(
     "/api/projects/:pid/cmd/:name",
@@ -334,7 +416,11 @@ export function registerApi(app: FastifyInstance, srv: AsfServer): void {
     wrap((req) => {
       human(req);
       const p = project(req);
-      const patch = settingsSchema.partial().parse(req.body);
+      // Validate the fields sent, and change only those. (A partial schema still fills every missing field with its
+      // default, which made each save reset the engine, models, gates, team, and checks to their defaults.)
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const parsed = settingsSchema.partial().parse(body) as Record<string, unknown>;
+      const patch = Object.fromEntries(Object.keys(body).filter((k) => k in parsed).map((k) => [k, parsed[k]]));
       return p.svc.updateSettings(patch);
     }),
   );
@@ -685,9 +771,12 @@ export function registerApi(app: FastifyInstance, srv: AsfServer): void {
     wrap((req) => {
       human(req);
       const p = project(req);
-      const tasks = p.svc.tasks({ kind: ["build"] });
+      // Cancelled tasks are no longer part of the plan, and finished ones cost nothing more.
+      const tasks = p.svc.tasks({ kind: ["build"] }).filter((t) => t.hold !== "cancelled");
       const stats = tasks.length ? planStats(tasks) : null;
-      const est = estimateBuild(stats?.byRole ?? {}, p.svc.avgTokensByRole(), p.svc.settings.qa_per_task);
+      const open: Record<string, number> = {};
+      for (const t of tasks) if (t.status !== "done") open[t.role] = (open[t.role] ?? 0) + 1;
+      const est = estimateBuild(open, p.svc.avgTokensByRole(), p.svc.settings.qa_per_task, p.svc.avgTurnsByRole());
       return { tasks: tasks.map(({ source: _s, body: _b, ...t }) => t), stats, estimate: est, team: p.svc.settings.team };
     }),
   );

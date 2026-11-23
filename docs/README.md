@@ -9,6 +9,7 @@ Start with the [main README](../README.md) for what AI Software Factory is, how 
 | [README: Quickstart](../README.md#quickstart) | Install, `asf setup`, `asf up` |
 | [README: Your first build](../README.md#your-first-build) | A step-by-step first project, gate by gate |
 | [Example ideas](../examples/README.md) | Idea briefs you can paste into the Idea screen |
+| [Built-in engine](engine.md) | Run without a subscription: free API keys, local models, team keys, choosing models, making free limits last |
 | [Security review](security-review.md) | What agents can and cannot do, controls, and known limits |
 
 ## How it works
@@ -40,6 +41,10 @@ Architecture decision records, oldest first. Each one states the context, the de
 | [0011](decisions/0011-process-tracks.md) | Process tracks sized by triage |
 | [0012](decisions/0012-rename-to-ai-software-factory.md) | Rename to AI Software Factory (`asf`) |
 | [0013](decisions/0013-logged-out-claude-pauses.md) | A logged-out Claude Code pauses the team instead of failing tasks |
+| [0014](decisions/0014-builtin-engine.md) | A built-in engine that runs agents on the team's own API keys |
+| [0015](decisions/0015-models-by-task.md) | Choosing models by task, from every free provider |
+| [0016](decisions/0016-fewer-tokens-per-request.md) | Fewer tokens per request, and notifications that point to their screen |
+| [0017](decisions/0017-fixes-from-a-real-run.md) | Fixes from a real run on free models |
 
 ## Project history
 

@@ -5,6 +5,7 @@ import {
   defaultSettings,
   formatId,
   mergeSettings,
+  normalizeBatch,
   parseConfigYaml,
   type Db,
   type DocStatus,
@@ -71,6 +72,12 @@ function parseJ<T>(s: unknown, fallback: T): T {
   }
 }
 
+/** A stored question batch, in the one shape readers expect (older rows may hold an agent's own shape). */
+function readBatch(s: unknown) {
+  const raw = parseJ<unknown>(s, null);
+  return raw === null ? null : normalizeBatch(raw);
+}
+
 /**
  * What the owner should be told about. Events that carry `data.notify` are the dashboard's notifications
  * (toasts, the bell, desktop notifications). level: action = the owner must do something; warning = something
@@ -92,6 +99,19 @@ const GATE_DOCS: Record<string, string> = {
   plan: "the plan",
   release: "the release",
 };
+
+/**
+ * An alert's notification: its first sentence as the title ("Usage limit reached"), the rest as the body, so the
+ * owner sees what happened without opening it. A first sentence too long for a title keeps a generic one.
+ */
+export function alertNote(text: string): { title: string; body?: string } {
+  const t = text.trim();
+  const m = /^(.+?)[.!?](?:\s+|$)/.exec(t);
+  const first = (m ? m[1]! : t).trim();
+  if (!first || first.length > 100) return { title: "AI Software Factory needs your attention", body: t };
+  const rest = m ? t.slice(m[0].length).trim() : "";
+  return rest ? { title: first, body: rest } : { title: first };
+}
 
 export function notificationFor(type: string, summary: string, data: Record<string, any>, meta: EventMeta): Notification | null {
   const task = meta.task ?? null;
@@ -125,9 +145,11 @@ export function notificationFor(type: string, summary: string, data: Record<stri
     case "qa.fail":
       return { level: "warning", title: `QA failed ${task}`, body: summary, screen: "board", task };
     // Failed checks, merge conflicts, usage limits, and stuck tasks all raise an alert with the details: one
-    // notification each, not two.
+    // notification each, not two. A task that was just blocked has already been announced ("T001 is blocked"),
+    // so its alert only adds the details to Questions & alerts.
     case "alert.raised":
-      return { level: "warning", title: "AI Software Factory needs your attention", body: summary, screen: "questions", task };
+      if (data.taskBlocked) return null;
+      return { level: "warning", ...alertNote(summary), screen: "questions", task };
     case "quota.resumed":
       return { level: "info", title: "Usage limit reset", body: "Agents are working again.", screen: "agents" };
     case "phase.changed":
@@ -203,6 +225,8 @@ export interface TaskMeta {
   /** Status to return to after a blocking question is answered. */
   resumeStatus?: TaskStatus;
   lastVerify?: { code: number; output: string; at: string };
+  /** Planning task: the document version its run submitted (that version's approval does not stop it). */
+  submitted?: { doc: string; version: number };
   [k: string]: unknown;
 }
 
@@ -291,7 +315,9 @@ export class ProjectService {
     const alerts = this.state.alerts ?? [];
     const a = { id: (alerts.at(-1)?.id ?? 0) + 1, ts: new Date().toISOString(), text, task: task ?? null };
     this.patchState({ alerts: [...alerts.slice(-49), a] });
-    this.emit("alert.raised", text, { alert: a }, { task });
+    // Raised right after blocking the task: the block was the notification (see notificationFor).
+    const taskBlocked = Boolean(task && this.task(task)?.status === "blocked");
+    this.emit("alert.raised", text, taskBlocked ? { alert: a, taskBlocked } : { alert: a }, { task });
   }
 
   dismissAlert(id: number): void {
@@ -638,12 +664,12 @@ export class ProjectService {
 
   question(id: string): Row | undefined {
     const q = this.db.get("SELECT * FROM questions WHERE id = ? OR message_id = ?", id, id);
-    return q ? { ...q, batch: parseJ(q.batch, null), answer: parseJ(q.answer, q.answer) } : undefined;
+    return q ? { ...q, batch: readBatch(q.batch), answer: parseJ(q.answer, q.answer) } : undefined;
   }
 
   questions(status?: string): Row[] {
     const rows = status ? this.db.all("SELECT * FROM questions WHERE status = ? ORDER BY created_at", status) : this.db.all("SELECT * FROM questions ORDER BY created_at");
-    return rows.map((q) => ({ ...q, batch: parseJ(q.batch, null), answer: parseJ(q.answer, q.answer) }));
+    return rows.map((q) => ({ ...q, batch: readBatch(q.batch), answer: parseJ(q.answer, q.answer) }));
   }
 
   markAnswered(id: string, answer: unknown, by: string): void {
@@ -864,6 +890,11 @@ export class ProjectService {
       byTask: this.db.all(`SELECT task, ${sum} FROM runs WHERE started_at >= ? AND task IS NOT NULL GROUP BY task ORDER BY tokens DESC LIMIT 50`, s),
       today: this.usedToday(),
     };
+  }
+
+  avgTurnsByRole(): Record<string, number> {
+    const rows = this.db.all("SELECT role, AVG(turns) AS avg FROM runs WHERE ended_at IS NOT NULL AND result_status = 'success' GROUP BY role");
+    return Object.fromEntries(rows.filter((r) => r.avg > 0).map((r) => [r.role, Math.round(r.avg)]));
   }
 
   avgTokensByRole(): Record<string, number> {
